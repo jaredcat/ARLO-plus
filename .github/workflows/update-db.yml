@@ -9,6 +9,10 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+  # Dispatch CI. A GITHUB_TOKEN push does not start pull_request workflows,
+  # and main requires the CI job named "check" before it can merge.
+  actions: write
 
 jobs:
   update-db:
@@ -49,19 +53,68 @@ jobs:
             echo "map_date=$MAP_DATE" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit and push changes
+      - name: Open catalog pull request
         if: steps.check_changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAP_DATE: ${{ steps.check_changes.outputs.map_date }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # main requires a pull request, so publish on a bot branch reset from
+          # main each run. This branch is not protected.
+          BRANCH="chore/auto-catalog"
+          git checkout -B "$BRANCH"
+
           # Drop legacy root-level catalog files if still present
           git rm -f --ignore-unmatch \
             items.csv items.db quests.csv quests.db \
             projects.csv projects.db traders.csv traders.db \
             missing_items.csv
+
           MAP_NOTE=""
-          if [ -n "${{ steps.check_changes.outputs.map_date }}" ]; then
-            MAP_NOTE=" maps ${{ steps.check_changes.outputs.map_date }}"
+          if [ -n "$MAP_DATE" ]; then
+            MAP_NOTE=" maps ${MAP_DATE}"
           fi
-          git commit -m "Auto-update catalog [$(date -u +%Y-%m-%d)]${MAP_NOTE}"
-          git push
+          TITLE="Auto-update catalog [$(date -u +%Y-%m-%d)]${MAP_NOTE}"
+          git commit -m "$TITLE"
+          git push --force origin "HEAD:${BRANCH}"
+
+          BODY="Weekly catalog refresh (items, quests, projects, traders, and maps). Opened by the Update Item Database workflow because main only accepts pull requests."
+
+          STATE="$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null || true)"
+          if [ "$STATE" = "OPEN" ]; then
+            gh pr edit "$BRANCH" --title "$TITLE" --body "$BODY"
+          else
+            gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY"
+          fi
+
+          # Start the required "check" status check on this commit.
+          gh workflow run ci.yml --ref "$BRANCH"
+          SHA="$(git rev-parse HEAD)"
+          RUN_ID=""
+          for _ in $(seq 1 12); do
+            RUN_ID="$(gh run list --workflow ci.yml --branch "$BRANCH" --limit 20 \
+              --json databaseId,headSha,event \
+              --jq "[.[] | select(.headSha==\"${SHA}\" and .event==\"workflow_dispatch\")][0].databaseId")"
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "CI did not start for ${SHA}" >&2
+            exit 1
+          fi
+          gh run watch "$RUN_ID" --exit-status
+
+          for _ in $(seq 1 6); do
+            if gh pr merge "$BRANCH" --merge; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Catalog pull request did not merge" >&2
+          exit 1
