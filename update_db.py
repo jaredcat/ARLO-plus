@@ -1851,19 +1851,73 @@ def scrape_wiki_traders() -> list[dict]:
     return traders
 
 
-def write_projects_catalog(
+def _encode_required_items_bit(req: dict) -> str | None:
+    """Encode one requirement as ``id:qty:name`` (optional ``:stage``)."""
+    raw_item = req.get("item")
+    item = raw_item if isinstance(raw_item, dict) else {}
+    item_id = str(req.get("item_id") or item.get("id") or "").strip()
+    item_name = str(item.get("name") or "").strip() or item_id
+    if not item_id and not item_name:
+        return None
+    bit = f"{item_id}:{req.get('quantity')}:{item_name}"
+    stage = req.get("stage")
+    if stage is not None and str(stage).strip():
+        with contextlib.suppress(TypeError, ValueError):
+            bit = f"{bit}:{int(stage)}"
+    return bit
+
+
+def _normalize_project_schedule(starts_on: str, ends_on: str) -> tuple[str, str]:
+    """Normalize free-text wiki dates to ISO when parseable."""
+    for label, raw in (("starts_on", starts_on), ("ends_on", ends_on)):
+        parsed = parse_wiki_date(raw)
+        if parsed is None:
+            continue
+        iso = parsed.isoformat()
+        if label == "starts_on":
+            starts_on = iso
+        else:
+            ends_on = iso
+    return starts_on, ends_on
+
+
+def _project_requirement_row(
+    pid: str, pname: str, req: dict
+) -> dict[str, str] | None:
+    """Flatten one API/wiki requirement into a CSV/SQLite row."""
+    raw_item = req.get("item")
+    item = raw_item if isinstance(raw_item, dict) else {}
+    item_id = str(req.get("item_id") or item.get("id") or "").strip()
+    item_name = str(item.get("name") or "").strip() or item_id
+    if not item_id:
+        return None
+    try:
+        qty = int(req.get("quantity") or 1)
+    except (TypeError, ValueError):
+        qty = 1
+    stage_val = 0
+    raw_stage = req.get("stage")
+    if raw_stage is not None and str(raw_stage).strip():
+        try:
+            stage_val = int(raw_stage)
+        except (TypeError, ValueError):
+            stage_val = 0
+    return {
+        "project_id": pid,
+        "project_name": pname,
+        "item_id": item_id,
+        "item_name": item_name,
+        "quantity": str(qty),
+        "stage": str(stage_val),
+    }
+
+
+def _collect_project_catalog_rows(
     projects: list[dict],
     *,
-    csv_path: Path = PROJECTS_CSV,
-    db_path: Path = PROJECTS_DB,
-    today: date | None = None,
-) -> dict[str, list[str]]:
-    """Persist projects.csv + project tables in arlo.db; return keep_for map.
-
-    Expired temporary projects are stored (with schedule columns) but omitted
-    from the returned item→project keep map so they no longer drive Keep.
-    """
-    today = today or datetime.now(UTC).date()
+    today: date,
+) -> tuple[list[dict[str, str]], list[dict[str, str]], set[str]]:
+    """Build project CSV rows, requirement rows, and the active-id set."""
     project_rows: list[dict[str, str]] = []
     req_rows: list[dict[str, str]] = []
     active_ids: set[str] = set()
@@ -1872,38 +1926,16 @@ def write_projects_catalog(
         pname = str(project.get("name") or "").strip()
         if not pid or not pname:
             continue
-        reqs = project.get("required_items") or []
-        parts: list[str] = []
-        for r in reqs:
-            if not isinstance(r, dict):
-                continue
-            raw_item = r.get("item")
-            item = raw_item if isinstance(raw_item, dict) else {}
-            item_id = str(r.get("item_id") or item.get("id") or "").strip()
-            item_name = str(item.get("name") or "").strip() or item_id
-            if not item_id and not item_name:
-                continue
-            bit = f"{item_id}:{r.get('quantity')}:{item_name}"
-            stage = r.get("stage")
-            if stage is not None and str(stage).strip():
-                with contextlib.suppress(TypeError, ValueError):
-                    bit = f"{bit}:{int(stage)}"
-            parts.append(bit)
-        project_type = str(project.get("project_type") or "").strip()
-        starts_on = str(project.get("starts_on") or "").strip()
-        ends_on = str(project.get("ends_on") or "").strip()
-        # Normalize free-text dates if a caller passed wiki strings
-        for label, raw in (("starts_on", starts_on), ("ends_on", ends_on)):
-            parsed = parse_wiki_date(raw)
-            if parsed is not None:
-                if label == "starts_on":
-                    starts_on = parsed.isoformat()
-                else:
-                    ends_on = parsed.isoformat()
+        reqs = [r for r in (project.get("required_items") or []) if isinstance(r, dict)]
+        parts = [bit for r in reqs if (bit := _encode_required_items_bit(r))]
+        starts_on, ends_on = _normalize_project_schedule(
+            str(project.get("starts_on") or "").strip(),
+            str(project.get("ends_on") or "").strip(),
+        )
         row = {
             "id": pid,
             "name": pname,
-            "project_type": project_type,
+            "project_type": str(project.get("project_type") or "").strip(),
             "starts_on": starts_on,
             "ends_on": ends_on,
             "required_items": "|".join(parts),
@@ -1912,39 +1944,15 @@ def write_projects_catalog(
         if project_is_active(row, today=today):
             active_ids.add(pid)
         for req in reqs:
-            if not isinstance(req, dict):
-                continue
-            raw_item = req.get("item")
-            item = raw_item if isinstance(raw_item, dict) else {}
-            item_id = str(req.get("item_id") or item.get("id") or "").strip()
-            item_name = str(item.get("name") or "").strip() or item_id
-            try:
-                qty = int(req.get("quantity") or 1)
-            except (TypeError, ValueError):
-                qty = 1
-            if not item_id:
-                continue
-            stage_val = 0
-            raw_stage = req.get("stage")
-            if raw_stage is not None and str(raw_stage).strip():
-                try:
-                    stage_val = int(raw_stage)
-                except (TypeError, ValueError):
-                    stage_val = 0
-            req_rows.append(
-                {
-                    "project_id": pid,
-                    "project_name": pname,
-                    "item_id": item_id,
-                    "item_name": item_name,
-                    "quantity": str(qty),
-                    "stage": str(stage_val),
-                }
-            )
-
+            req_row = _project_requirement_row(pid, pname, req)
+            if req_row is not None:
+                req_rows.append(req_row)
     project_rows.sort(key=operator.itemgetter("id"))
+    return project_rows, req_rows, active_ids
+
+
+def _write_projects_csv(project_rows: list[dict[str, str]], csv_path: Path) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f,
@@ -1960,6 +1968,13 @@ def write_projects_catalog(
         writer.writeheader()
         writer.writerows(project_rows)
 
+
+def _write_projects_sqlite(
+    project_rows: list[dict[str, str]],
+    req_rows: list[dict[str, str]],
+    db_path: Path,
+) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(
@@ -2019,11 +2034,12 @@ def write_projects_catalog(
     finally:
         conn.close()
 
-    expired_n = len(project_rows) - len(active_ids)
-    print(
-        f"  Wrote {len(project_rows)} projects to {csv_path.name} / {db_path.name}"
-        + (f" ({expired_n} expired, excluded from keep)" if expired_n else "")
-    )
+
+def _project_keep_map(
+    req_rows: list[dict[str, str]],
+    active_ids: set[str],
+) -> dict[str, list[str]]:
+    """Item name → active project keep labels (with stage when set)."""
     project_map: dict[str, list[str]] = {}
     for row in req_rows:
         if row["project_id"] not in active_ids:
@@ -2039,6 +2055,33 @@ def write_projects_catalog(
             f"{label} ({row['quantity']}x)"
         )
     return project_map
+
+
+def write_projects_catalog(
+    projects: list[dict],
+    *,
+    csv_path: Path = PROJECTS_CSV,
+    db_path: Path = PROJECTS_DB,
+    today: date | None = None,
+) -> dict[str, list[str]]:
+    """Persist projects.csv + project tables in arlo.db; return keep_for map.
+
+    Expired temporary projects are stored (with schedule columns) but omitted
+    from the returned item→project keep map so they no longer drive Keep.
+    """
+    today = today or datetime.now(UTC).date()
+    project_rows, req_rows, active_ids = _collect_project_catalog_rows(
+        projects, today=today
+    )
+    _write_projects_csv(project_rows, csv_path)
+    _write_projects_sqlite(project_rows, req_rows, db_path)
+
+    expired_n = len(project_rows) - len(active_ids)
+    print(
+        f"  Wrote {len(project_rows)} projects to {csv_path.name} / {db_path.name}"
+        + (f" ({expired_n} expired, excluded from keep)" if expired_n else "")
+    )
+    return _project_keep_map(req_rows, active_ids)
 
 
 def write_traders_catalog(
@@ -2473,6 +2516,91 @@ def _dedupe_keep_entries(entries: list[str]) -> list[str]:
     ]
 
 
+def _keep_entry_label(entry: str) -> str:
+    return _QTY_SUFFIX_RE.sub("", entry).strip()
+
+
+def _project_entry_active(entry: str, inactive: set[str]) -> bool:
+    """True when the entry's project (or staged base name) is still active."""
+    pname = _keep_entry_label(entry).lower()
+    # Staged labels ("Trophy Display 2") — expire check uses the base name.
+    base = _TRAILING_TIER_RE.sub("", pname).strip()
+    return bool(pname) and pname not in inactive and base not in inactive
+
+
+def _split_wiki_keep_sections(
+    wiki: str, inactive: set[str]
+) -> tuple[list[str], list[str]]:
+    """Split wiki keep text into non-Projects preamble and project entries."""
+    preamble_parts: list[str] = []
+    project_entries: list[str] = []
+    if not wiki:
+        return preamble_parts, project_entries
+    for chunk in re.split(_SECTION_LOOKAHEAD, wiki):
+        chunk_stripped = chunk.strip().strip(";").strip()
+        if not chunk_stripped:
+            continue
+        m = re.match(r"^Projects:\s*(.*)$", chunk_stripped, re.IGNORECASE | re.DOTALL)
+        if not m:
+            preamble_parts.append(chunk_stripped)
+            continue
+        body = m.group(1).strip()
+        for em in _KEEP_ENTRY_RE.finditer(body):
+            label = em.group(1).strip().strip(",;").strip()
+            entry = f"{label} ({em.group(2)}x)"
+            if _project_entry_active(entry, inactive):
+                project_entries.append(entry)
+    return preamble_parts, project_entries
+
+
+def _quest_entries_not_in_wiki(
+    quest_uses: list[str], wiki_lower: str
+) -> list[str]:
+    quest_entries: list[str] = []
+    for entry in quest_uses:
+        quest_name = _keep_entry_label(entry)
+        if quest_name and quest_name.lower() not in wiki_lower:
+            quest_entries.append(entry)
+    return quest_entries
+
+
+def _merge_catalog_project_entries(
+    project_entries: list[str],
+    project_uses: list[str],
+    *,
+    wiki_lower: str,
+    inactive: set[str],
+) -> list[str]:
+    """Append catalog projects not already present in wiki/project text."""
+    seen = {_keep_entry_label(e).lower() for e in project_entries}
+    for entry in project_uses:
+        project_name = _keep_entry_label(entry)
+        key = project_name.lower()
+        if (
+            project_name
+            and key not in wiki_lower
+            and key not in seen
+            and _project_entry_active(entry, inactive)
+        ):
+            project_entries.append(entry)
+            seen.add(key)
+    return project_entries
+
+
+def _prefer_staged_project_labels(project_entries: list[str]) -> list[str]:
+    """Drop bare wiki labels when a staged catalog label exists for the same project."""
+    staged_bases = {
+        _TRAILING_TIER_RE.sub("", _keep_entry_label(e)).strip().lower()
+        for e in project_entries
+        if _TRAILING_TIER_RE.search(_keep_entry_label(e))
+    }
+    if not staged_bases:
+        return project_entries
+    return [
+        e for e in project_entries if _keep_entry_label(e).lower() not in staged_bases
+    ]
+
+
 def format_keep_for(
     wiki_uses: str = "",
     quest_uses: list[str] | None = None,
@@ -2496,72 +2624,15 @@ def format_keep_for(
         if n.strip()
     }
 
-    def _project_active(entry: str) -> bool:
-        pname = _QTY_SUFFIX_RE.sub("", entry).strip().lower()
-        # Staged labels ("Trophy Display 2") — expire check uses the base name.
-        base = _TRAILING_TIER_RE.sub("", pname).strip()
-        return bool(pname) and pname not in inactive and base not in inactive
-
-    def _entry_label(entry: str) -> str:
-        return _QTY_SUFFIX_RE.sub("", entry).strip()
-
-    # Split wiki into non-Projects preamble vs existing Projects body so we can
-    # append catalog projects without a second "Projects:" header.
-    preamble_parts: list[str] = []
-    project_entries: list[str] = []
-    if wiki:
-        for chunk in re.split(
-            _SECTION_LOOKAHEAD,
-            wiki,
-        ):
-            chunk_stripped = chunk.strip().strip(";").strip()
-            if not chunk_stripped:
-                continue
-            m = re.match(
-                r"^Projects:\s*(.*)$", chunk_stripped, re.IGNORECASE | re.DOTALL
-            )
-            if m:
-                body = m.group(1).strip()
-                for em in _KEEP_ENTRY_RE.finditer(body):
-                    label = em.group(1).strip().strip(",;").strip()
-                    entry = f"{label} ({em.group(2)}x)"
-                    if _project_active(entry):
-                        project_entries.append(entry)
-            else:
-                preamble_parts.append(chunk_stripped)
-
-    quests = quest_uses or []
-    quest_entries: list[str] = []
-    for entry in quests:
-        quest_name = _QTY_SUFFIX_RE.sub("", entry).strip()
-        if quest_name and quest_name.lower() not in wiki_lower:
-            quest_entries.append(entry)
-
-    seen_projects = {_entry_label(e).lower() for e in project_entries}
-    for entry in project_uses or []:
-        project_name = _entry_label(entry)
-        key = project_name.lower()
-        if (
-            project_name
-            and key not in wiki_lower
-            and key not in seen_projects
-            and _project_active(entry)
-        ):
-            project_entries.append(entry)
-            seen_projects.add(key)
-
-    # Prefer staged catalog labels ("Trophy Display 2") over bare wiki
-    # "Trophy Display" for the same project.
-    staged_bases = {
-        _TRAILING_TIER_RE.sub("", _entry_label(e)).strip().lower()
-        for e in project_entries
-        if _TRAILING_TIER_RE.search(_entry_label(e))
-    }
-    if staged_bases:
-        project_entries = [
-            e for e in project_entries if _entry_label(e).lower() not in staged_bases
-        ]
-
+    preamble_parts, project_entries = _split_wiki_keep_sections(wiki, inactive)
+    quest_entries = _quest_entries_not_in_wiki(quest_uses or [], wiki_lower)
+    project_entries = _merge_catalog_project_entries(
+        project_entries,
+        project_uses or [],
+        wiki_lower=wiki_lower,
+        inactive=inactive,
+    )
+    project_entries = _prefer_staged_project_labels(project_entries)
     project_entries = _dedupe_keep_entries(project_entries)
     quest_entries = _dedupe_keep_entries(quest_entries)
 
@@ -2645,82 +2716,137 @@ def merge_action(old_action: str, new_action: str, keep_for: str) -> str:
 # =============================================================================
 
 
-def generate_action(item: GameItem) -> tuple[str, str, str]:  # ruff: ignore[too-many-branches]
-    """Decide keep/recycle/sell from category + uses (decision table; split later)."""
+def _action_quick_use(
+    *, has_uses: bool, keep_for: str, recycle_for: str
+) -> tuple[str, str, str]:
+    if has_uses:
+        return "Keep", recycle_for, keep_for
+    return "Use", recycle_for, "Quick Use consumable"
+
+
+def _action_research_item(item: GameItem, keep_for: str) -> tuple[str, str, str]:
+    rp_note = research_item_rp_note(item.name)
+    # Preserve workshop/research-station upgrade keeps; always note RP convert
+    if keep_for and rp_note.lower() not in keep_for.lower():
+        keep_for = f"{keep_for}; {rp_note}"
+    elif not keep_for:
+        keep_for = rp_note
+    if has_progress_keep(keep_for) and "research station" in keep_for.lower():
+        action = "Keep until uses complete; then convert to research points"
+    else:
+        action = "Convert to research points"
+    return action, item.recycles_to, keep_for
+
+
+def _action_nature(
+    *, has_uses: bool, keep_for: str, recycle_for: str
+) -> tuple[str, str, str]:
+    if has_uses:
+        return "Keep", recycle_for, keep_for
+    return "Sell", recycle_for, ""
+
+
+def _action_trinket(*, has_uses: bool, keep_for: str) -> tuple[str, str, str]:
+    if has_uses:
+        return "Keep until uses complete; sell after", "", keep_for
+    return "Sell", "", ""
+
+
+def _action_recyclable(
+    *,
+    has_uses: bool,
+    can_recycle: bool,
+    keep_for: str,
+    recycle_for: str,
+) -> tuple[str, str, str]:
+    if has_uses:
+        return "Keep until uses complete; recycle after", recycle_for, keep_for
+    # Don't push Recycle/Sell — many "recyclables" (Hand Drill, …) are
+    # crafting ingredients; show yield and let the player choose.
+    if can_recycle:
+        return "Crafting item", recycle_for, "Used in crafting"
+    return "Sell", "", ""
+
+
+def _action_deprecated(
+    *, keep_for: str, can_recycle: bool, recycle_for: str
+) -> tuple[str, str, str]:
+    note = keep_for or "Deprecated — sell or recycle"
+    if can_recycle:
+        return "Sell or recycle", recycle_for, note
+    return "Sell", "", note
+
+
+def _action_fallback(
+    *,
+    has_uses: bool,
+    can_recycle: bool,
+    keep_for: str,
+    recycle_for: str,
+) -> tuple[str, str, str]:
+    if has_uses:
+        return "Keep", recycle_for, keep_for
+    if can_recycle:
+        return "Crafting item", recycle_for, "Used in crafting"
+    return "Sell", "", ""
+
+
+def generate_action(item: GameItem) -> tuple[str, str, str]:
+    """Decide keep/recycle/sell from category + uses."""
     has_uses = bool(item.uses.strip())
     can_recycle = bool(item.recycles_to.strip())
     category = item.category.strip()
-
     keep_for = item.uses if has_uses else ""
     recycle_for = item.recycles_to
-    action: str
+    name_lower = item.name.strip().lower()
 
     # Currency-like trade fodder — players sell or hold for player trading
-    if item.name.strip().lower() == "assorted seeds":
-        action = "Sell or keep for user trading"
+    if name_lower == "assorted seeds":
+        result = ("Sell or keep for user trading", recycle_for, keep_for)
     elif category == "Key":
-        action, recycle_for, keep_for = "Keep", "", "Unlocks locked areas"
+        result = ("Keep", "", "Unlocks locked areas")
     elif category == _QUICK_USE:
-        if has_uses:
-            action = "Keep"
-        else:
-            action, keep_for = "Use", "Quick Use consumable"
+        result = _action_quick_use(
+            has_uses=has_uses, keep_for=keep_for, recycle_for=recycle_for
+        )
     elif category == "Ammunition":
-        action, recycle_for, keep_for = "Keep", "", "Ammo"
+        result = ("Keep", "", "Ammo")
     elif category in {"Shield", "Augment", "Mods", "Weapon"}:
-        action, keep_for = "Keep", f"Equippable {category}"
+        result = ("Keep", recycle_for, f"Equippable {category}")
     elif category == "Blueprint":
-        action, keep_for = "Keep", "Learn, sell, or trade to other players"
-    elif category == _RESEARCH_ITEM or item.name.strip().lower() in _RESEARCH_ITEM_RP:
-        rp_note = research_item_rp_note(item.name)
-        # Preserve workshop/research-station upgrade keeps; always note RP convert
-        if keep_for and rp_note.lower() not in keep_for.lower():
-            keep_for = f"{keep_for}; {rp_note}"
-        elif not keep_for:
-            keep_for = rp_note
-        if has_progress_keep(keep_for) and "research station" in keep_for.lower():
-            action = "Keep until uses complete; then convert to research points"
-        else:
-            action = "Convert to research points"
+        result = ("Keep", recycle_for, "Learn, sell, or trade to other players")
+    elif category == _RESEARCH_ITEM or name_lower in _RESEARCH_ITEM_RP:
+        result = _action_research_item(item, keep_for)
     elif category in MATERIAL_CATEGORIES:
-        action = "Keep"
         if not has_uses:
             keep_for = f"{category} - crafting ingredient"
+        result = ("Keep", recycle_for, keep_for)
     elif category == "Nature":
-        if has_uses:
-            action = "Keep"
-        else:
-            action, keep_for = "Sell", ""
+        result = _action_nature(
+            has_uses=has_uses, keep_for=keep_for, recycle_for=recycle_for
+        )
     elif category == "Trinket":
-        recycle_for = ""
-        if has_uses:
-            action = "Keep until uses complete; sell after"
-        else:
-            action, keep_for = "Sell", ""
+        result = _action_trinket(has_uses=has_uses, keep_for=keep_for)
     elif category == "Recyclable":
-        if has_uses:
-            action = "Keep until uses complete; recycle after"
-        # Don't push Recycle/Sell — many "recyclables" (Hand Drill, …) are
-        # crafting ingredients; show yield and let the player choose.
-        elif can_recycle:
-            action, keep_for = "Crafting item", "Used in crafting"
-        else:
-            action, recycle_for, keep_for = "Sell", "", ""
+        result = _action_recyclable(
+            has_uses=has_uses,
+            can_recycle=can_recycle,
+            keep_for=keep_for,
+            recycle_for=recycle_for,
+        )
     # Retired mods/items (e.g. MetaForge ``Deprecated Anvil Splitter``)
-    elif item.name.lower().startswith("deprecated "):
-        note = keep_for or "Deprecated — sell or recycle"
-        if can_recycle:
-            action, keep_for = "Sell or recycle", note
-        else:
-            action, recycle_for, keep_for = "Sell", "", note
-    elif has_uses:
-        action = "Keep"
-    elif can_recycle:
-        action, keep_for = "Crafting item", "Used in crafting"
+    elif name_lower.startswith("deprecated "):
+        result = _action_deprecated(
+            keep_for=keep_for, can_recycle=can_recycle, recycle_for=recycle_for
+        )
     else:
-        action, recycle_for, keep_for = "Sell", "", ""
-
-    return action, recycle_for, keep_for
+        result = _action_fallback(
+            has_uses=has_uses,
+            can_recycle=can_recycle,
+            keep_for=keep_for,
+            recycle_for=recycle_for,
+        )
+    return result
 
 
 # =============================================================================
@@ -3046,7 +3172,7 @@ def rebuild_arlo_db_from_csvs(*, db_path: Path = ARLO_DB) -> None:
 # =============================================================================
 
 
-def main() -> None:
+def _build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Update catalog CSVs and arlo.db from MetaForge API + Arc Raiders Wiki."
@@ -3103,56 +3229,95 @@ Examples:
             "catalogs. wiki: wiki Loot only."
         ),
     )
+    return parser
 
-    args = parser.parse_args()
+
+def _run_maps_only_cli(args: argparse.Namespace) -> None:
+    if args.dry_run:
+        print("[DRY RUN] Would fetch map markers + basemaps")
+        return
+    from arc_helper.map_ingest import store_map_catalog
+
+    print("Updating map catalog from Metaforge...")
+    stats = store_map_catalog(
+        ARLO_DB,
+        force_assets=args.force_map_assets,
+        fetch_loose_spots=args.loose_spots,
+    )
+    total = sum(v for k, v in stats.items() if not k.startswith("_"))
+    extra = ""
+    if "_loose_clusters" in stats:
+        extra = f", {stats['_loose_clusters']} loose-spot clusters"
+    print(
+        f"Done — {total} markers across "
+        f"{len([k for k in stats if not k.startswith('_')])} maps"
+        f"{extra}"
+    )
+
+
+def _fetch_items_for_cli(
+    source: str, *, persist_side: bool
+) -> tuple[list[GameItem], str]:
+    if source == "wiki":
+        items = fetch_items_from_wiki()
+        if persist_side:
+            persist_wiki_side_catalogs()
+            # still try API; wiki enrich inside
+            fetch_metaforge_quest_items(persist=True)
+        return items, "Arc Raiders Wiki"
+    if source == "api":
+        return (
+            fetch_items_from_metaforge_only(persist_side_catalogs=persist_side),
+            "MetaForge API",
+        )
+    try:
+        return (
+            fetch_items_hybrid(persist_side_catalogs=persist_side),
+            "MetaForge API + Wiki",
+        )
+    except Exception as e:
+        print(f"\nHybrid fetch failed ({e}), falling back to wiki only...")
+        items = fetch_items_from_wiki()
+        if persist_side:
+            persist_wiki_side_catalogs()
+        return items, "Arc Raiders Wiki (fallback)"
+
+
+def _print_update_stats(stats: ScraperStats, *, merge: bool) -> None:
+    print(f"\n{'=' * 50}")
+    print(f"  Source:                  {stats.source}")
+    print(f"  Items fetched:           {stats.items_scraped}")
+    print(f"  Items to write:          {stats.items_written}")
+    if merge:
+        print(f"  Existing preserved:      {stats.items_preserved}")
+        print(f"  New items added:         {stats.items_new}")
+    print(f"{'=' * 50}")
+
+
+def _print_dry_run_preview(rows: list[dict[str, str]]) -> None:
+    print("\n[DRY RUN] Preview of first 20 items:\n")
+    print(
+        f"  {'Name':<35} {'Action':<40} {'Sell':>7} {'Stack':>5}  {'Recycle For':<25}"
+    )
+    print(f"  {'-' * 35} {'-' * 40} {'-' * 7} {'-' * 5}  {'-' * 25}")
+    for row in rows[:20]:
+        print(
+            f"  {row['name']:<35} {row['action']:<40} "
+            f"{row.get('sell_price', ''):>7} {row.get('stack_size', ''):>5}  "
+            f"{row['recycle_for']:<25}"
+        )
+    print(f"\n  ... and {len(rows) - 20} more items")
+
+
+def main() -> None:
+    args = _build_cli_parser().parse_args()
 
     if args.maps_only:
-        if args.dry_run:
-            print("[DRY RUN] Would fetch map markers + basemaps")
-            return
-        from arc_helper.map_ingest import store_map_catalog
-
-        print("Updating map catalog from Metaforge...")
-        stats = store_map_catalog(
-            ARLO_DB,
-            force_assets=args.force_map_assets,
-            fetch_loose_spots=args.loose_spots,
-        )
-        total = sum(v for k, v in stats.items() if not k.startswith("_"))
-        extra = ""
-        if "_loose_clusters" in stats:
-            extra = f", {stats['_loose_clusters']} loose-spot clusters"
-        print(
-            f"Done — {total} markers across "
-            f"{len([k for k in stats if not k.startswith('_')])} maps"
-            f"{extra}"
-        )
+        _run_maps_only_cli(args)
         return
 
     persist_side = not args.dry_run
-
-    if args.source == "wiki":
-        items = fetch_items_from_wiki()
-        source_name = "Arc Raiders Wiki"
-        if persist_side:
-            persist_wiki_side_catalogs()
-            fetch_metaforge_quest_items(
-                persist=True
-            )  # still try API; wiki enrich inside
-    elif args.source == "api":
-        items = fetch_items_from_metaforge_only(persist_side_catalogs=persist_side)
-        source_name = "MetaForge API"
-    else:
-        try:
-            items = fetch_items_hybrid(persist_side_catalogs=persist_side)
-            source_name = "MetaForge API + Wiki"
-        except Exception as e:
-            print(f"\nHybrid fetch failed ({e}), falling back to wiki only...")
-            items = fetch_items_from_wiki()
-            source_name = "Arc Raiders Wiki (fallback)"
-            if persist_side:
-                persist_wiki_side_catalogs()
-
+    items, source_name = _fetch_items_for_cli(args.source, persist_side=persist_side)
     if not items:
         print("No items found. Aborting.")
         sys.exit(1)
@@ -3164,27 +3329,10 @@ Examples:
 
     rows, stats = build_csv_rows(items, existing, merge=args.merge)
     stats.source = source_name
-
-    print(f"\n{'=' * 50}")
-    print(f"  Source:                  {stats.source}")
-    print(f"  Items fetched:           {stats.items_scraped}")
-    print(f"  Items to write:          {stats.items_written}")
-    if args.merge:
-        print(f"  Existing preserved:      {stats.items_preserved}")
-        print(f"  New items added:         {stats.items_new}")
-    print(f"{'=' * 50}")
+    _print_update_stats(stats, merge=args.merge)
 
     if args.dry_run:
-        print("\n[DRY RUN] Preview of first 20 items:\n")
-        print(
-            f"  {'Name':<35} {'Action':<40} {'Sell':>7} {'Stack':>5}  {'Recycle For':<25}"
-        )
-        print(f"  {'-' * 35} {'-' * 40} {'-' * 7} {'-' * 5}  {'-' * 25}")
-        for row in rows[:20]:
-            print(
-                f"  {row['name']:<35} {row['action']:<40} {row.get('sell_price', ''):>7} {row.get('stack_size', ''):>5}  {row['recycle_for']:<25}"
-            )
-        print(f"\n  ... and {len(rows) - 20} more items")
+        _print_dry_run_preview(rows)
         return
 
     write_csv(rows, ITEMS_CSV)
