@@ -321,10 +321,13 @@ class Scanner:
                 if not self._scan_tick(ocr, settings):
                     break
             except ScreenCaptureUnavailable as e:
-                logger.error(f"Screen capture lost permanently: {e}")
+                # Backend latched a fatal capture error. Keep the loop alive so a
+                # later portal reconnect (or manual share re-approve) can recover
+                # once grab() succeeds again.
+                logger.error(f"Screen capture unavailable: {e}")
                 self._update_status("error")
-                self.state = ScannerState.STOPPED
-                break  # latch: no point scanning without capture
+                self.state = ScannerState.IDLE
+                time.sleep(2.0)
             except Exception as e:  # ruff: ignore[blind-except]
                 logger.error(f"Scanner error: {e}")
                 self._update_status("error")

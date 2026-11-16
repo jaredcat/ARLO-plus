@@ -6,6 +6,7 @@ damage, so pipewiresrc's keepalive re-pushes the last frame periodically.
 """
 
 import threading
+import time
 from typing import cast
 
 from PIL import Image
@@ -44,6 +45,9 @@ from .portal import ScreenCastSession  # ruff: ignore[module-import-not-at-top-o
 
 FIRST_FRAME_TIMEOUT_S = 10.0
 KEEPALIVE_MS = 500
+# Avoid spamming the portal when the compositor flaps the session
+# (monitor hotplug, tray "Stop sharing", competing ScreenCast clients).
+RESTART_COOLDOWN_S = 2.0
 
 
 class WaylandBackend:
@@ -59,7 +63,10 @@ class WaylandBackend:
         self._first_frame = threading.Event()
         self._size: tuple[int, int] = (0, 0)
         self._tk_scale = 1.0
-        self._restarted = False
+        self._restart_lock = threading.Lock()
+        self._last_restart_at = 0.0
+        # Only set for truly fatal setup failures callers may latch on;
+        # portal session closes recover via _attempt_restart instead.
         self._terminal_error: str | None = None
 
     def start(self) -> None:
@@ -136,6 +143,7 @@ class WaylandBackend:
         # Plain attribute stores (atomic in CPython); readers may see one stale frame's worth during restart - harmless.
         self._size = (width, height)
         self._tk_scale = compute_scale(width, self._x11_logical_width())
+        self._terminal_error = None
         logger.info(f"Wayland capture: {width}x{height}, tk scale {self._tk_scale:.4g}")
 
     def stop(self) -> None:
@@ -152,7 +160,7 @@ class WaylandBackend:
         if self._terminal_error is not None:
             raise ScreenCaptureUnavailable(self._terminal_error)
         session = self._session  # local ref: stop() may null it concurrently
-        if session is not None and session.closed.is_set():
+        if session is None or session.closed.is_set():
             self._attempt_restart()
         with self._lock:
             frame = self._frame
@@ -237,22 +245,29 @@ class WaylandBackend:
         return width
 
     def _attempt_restart(self) -> None:
-        if self._restarted:
-            # Deliberately leave the dead session in place as a tombstone;
-            # clearing it would let grab() serve the frozen last frame.
-            self._terminal_error = (
-                "Screen sharing was stopped (portal session closed). "
-                "Restart ARLO to share again."
-            )
-            raise ScreenCaptureUnavailable(self._terminal_error)
-        self._restarted = True
-        logger.warning("Portal session closed - attempting one restart")
-        self.stop()
-        try:
-            self.start()
-        except Exception as e:
-            self._terminal_error = (
-                f"Screen sharing could not be restored: {e}\n"
-                "Restart ARLO to share again."
-            )
-            raise ScreenCaptureUnavailable(self._terminal_error) from e
+        """Reconnect ScreenCast after the compositor/user closes the session.
+
+        Retries indefinitely with a cooldown. Failures raise plain OSError so
+        OCR can soft-fail (black frame) and the next scan tick tries again —
+        typically via the restore token without another dialog.
+        """
+        with self._restart_lock:
+            session = self._session
+            if session is not None and not session.closed.is_set():
+                return  # another grab() already recovered
+            now = time.monotonic()
+            elapsed = now - self._last_restart_at
+            if self._last_restart_at > 0 and elapsed < RESTART_COOLDOWN_S:
+                remaining = RESTART_COOLDOWN_S - elapsed
+                msg = f"Screen share reconnecting (retry in {remaining:.1f}s)"
+                raise OSError(msg)
+            self._last_restart_at = now
+            logger.warning("Portal session closed - reconnecting screen share")
+            self.stop()
+            try:
+                self.start()
+            except Exception as e:
+                # Leave session/pipeline None so the next grab retries.
+                logger.error(f"Screen share reconnect failed: {e}")
+                msg = f"Screen sharing reconnect failed: {e}"
+                raise OSError(msg) from e

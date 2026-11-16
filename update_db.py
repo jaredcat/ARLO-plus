@@ -1881,9 +1881,7 @@ def _normalize_project_schedule(starts_on: str, ends_on: str) -> tuple[str, str]
     return starts_on, ends_on
 
 
-def _project_requirement_row(
-    pid: str, pname: str, req: dict
-) -> dict[str, str] | None:
+def _project_requirement_row(pid: str, pname: str, req: dict) -> dict[str, str] | None:
     """Flatten one API/wiki requirement into a CSV/SQLite row."""
     raw_item = req.get("item")
     item = raw_item if isinstance(raw_item, dict) else {}
@@ -2553,9 +2551,7 @@ def _split_wiki_keep_sections(
     return preamble_parts, project_entries
 
 
-def _quest_entries_not_in_wiki(
-    quest_uses: list[str], wiki_lower: str
-) -> list[str]:
+def _quest_entries_not_in_wiki(quest_uses: list[str], wiki_lower: str) -> list[str]:
     quest_entries: list[str] = []
     for entry in quest_uses:
         quest_name = _keep_entry_label(entry)
