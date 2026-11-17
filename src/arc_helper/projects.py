@@ -56,6 +56,7 @@ class ProjectCatalog:
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = db_path if db_path is not None else _default_db_path()
         self._schedule_cache: dict[str, date | None] | None = None
+        self._type_cache: dict[str, str] | None = None
         self._name_to_id: dict[str, str] | None = None
 
     @property
@@ -83,17 +84,36 @@ class ProjectCatalog:
         }
         return "ends_on" in cols
 
+    @staticmethod
+    def _has_type_column(conn: sqlite3.Connection) -> bool:
+        cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()
+        }
+        return "project_type" in cols
+
     def _load_schedule(self) -> None:
         if self._schedule_cache is not None:
             return
         ends: dict[str, date | None] = {}
+        types: dict[str, str] = {}
         names: dict[str, str] = {}
         if not self.available:
             self._schedule_cache = ends
+            self._type_cache = types
             self._name_to_id = names
             return
         with self._connect() as conn:
-            if self._has_schedule_columns(conn):
+            has_schedule = self._has_schedule_columns(conn)
+            has_type = self._has_type_column(conn)
+            if has_schedule and has_type:
+                rows = conn.execute(
+                    "SELECT id, name, ends_on, project_type FROM projects"
+                ).fetchall()
+                for row in rows:
+                    ends[row["id"]] = _parse_iso_date(row["ends_on"])
+                    types[row["id"]] = str(row["project_type"] or "").strip()
+                    names[_norm_name(row["name"])] = row["id"]
+            elif has_schedule:
                 rows = conn.execute("SELECT id, name, ends_on FROM projects").fetchall()
                 for row in rows:
                     ends[row["id"]] = _parse_iso_date(row["ends_on"])
@@ -104,7 +124,37 @@ class ProjectCatalog:
                     ends[row["id"]] = None
                     names[_norm_name(row["name"])] = row["id"]
         self._schedule_cache = ends
+        self._type_cache = types
         self._name_to_id = names
+
+    def _resolve_project_id(self, project_id_or_name: str) -> str | None:
+        """Map a keep_for label / id to the catalog project id, if known."""
+        self._load_schedule()
+        assert self._schedule_cache is not None
+        assert self._name_to_id is not None
+        key = (project_id_or_name or "").strip()
+        if not key:
+            return None
+        if key in self._schedule_cache:
+            return key
+        pid = self._name_to_id.get(_norm_name(key))
+        if pid is not None:
+            return pid
+        # Prefix: "Expedition 5" → catalog id "expedition"
+        compact = _norm_name(key)
+        for name, cand in self._name_to_id.items():
+            if compact == name or compact.startswith(name + " "):
+                return cand
+        return None
+
+    def is_paused(self, project_id_or_name: str) -> bool:
+        """True when the catalog marks this project ``project_type=PAUSED``."""
+        self._load_schedule()
+        assert self._type_cache is not None
+        pid = self._resolve_project_id(project_id_or_name)
+        if pid is None:
+            return False
+        return self._type_cache.get(pid, "").upper() == "PAUSED"
 
     def is_active(
         self,
@@ -112,29 +162,22 @@ class ProjectCatalog:
         *,
         today: date | None = None,
     ) -> bool:
-        """True when the project has no end date or has not expired yet.
+        """True when the project is not expired and not a disabled PAUSED type.
 
-        Unknown labels (e.g. wiki-only ``Expedition 5``) fail open as active.
+        Unknown labels (e.g. wiki-only ``Expedition 5`` without a catalog row)
+        fail open as active. PAUSED types are omitted when
+        ``DISABLE_PAUSED_PROJECTS`` is true (default).
         """
         today = today or datetime.now(UTC).date()
         self._load_schedule()
         assert self._schedule_cache is not None
-        assert self._name_to_id is not None
-        key = (project_id_or_name or "").strip()
-        if not key:
-            return True
-        pid = key if key in self._schedule_cache else None
-        if pid is None:
-            pid = self._name_to_id.get(_norm_name(key))
-        if pid is None:
-            # Prefix: "Expedition 5" → catalog id "expedition"
-            compact = _norm_name(key)
-            for name, cand in self._name_to_id.items():
-                if compact == name or compact.startswith(name + " "):
-                    pid = cand
-                    break
+        pid = self._resolve_project_id(project_id_or_name)
         if pid is None:
             return True
+        from arc_helper.config import get_settings
+
+        if get_settings().disable_paused_projects and self.is_paused(pid):
+            return False
         end = self._schedule_cache.get(pid)
         if end is None:
             return True

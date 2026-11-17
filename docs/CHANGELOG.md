@@ -8,7 +8,9 @@ All notable changes to this project will be documented in this file.
 
 - Wayland: auto-reconnect ScreenCast after the portal session drops (no permanent Error latch)
 - Wayland: cut gameplay frame-time cost — on-demand frame pulls, leaky pre-convert queue, pause capture while idle
+- Wayland: cap ScreenCast frame reuse at 1s; wait ~keepalive for samples; on real stalls nudge then force portal reconnect (session can look open while PipeWire is dead)
 - Add `IDLE_SCAN_INTERVAL` (default 1s) so inventory/map probes are slower during active play
+- Add `DISABLE_PAUSED_PROJECTS` (default on) to omit PAUSED catalog projects (e.g. Expedition) from keep reasons; when off, paused projects sort last
 - Refactor oversized `update_db.py` catalog helpers without changing scrape behavior
 
 ### [1.0.1]

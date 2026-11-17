@@ -19,6 +19,7 @@ __all__ = [
     "ScreenBackend",
     "ScreenCaptureUnavailable",
     "get_backend",
+    "invalidate_cached_frame",
     "phys_to_tk",
     "reset_backend",
     "set_live_capture",
@@ -80,3 +81,11 @@ def set_live_capture(*, enabled: bool) -> None:  # ruff: ignore[non-empty-init-m
     setter = getattr(backend, "set_live_capture", None)
     if setter is not None:
         setter(enabled=enabled)
+
+
+def invalidate_cached_frame() -> None:  # ruff: ignore[non-empty-init-module]
+    """Drop any cached Wayland sample so the next grab must pull fresh pixels."""
+    backend = get_backend()
+    clearer = getattr(backend, "invalidate_cached_frame", None)
+    if clearer is not None:
+        clearer()

@@ -65,6 +65,28 @@ def test_format_keep_for_merges_projects_into_one_section():
     )
 
 
+def test_format_keep_for_drops_paused_when_disabled(monkeypatch):
+    monkeypatch.setenv("DISABLE_PAUSED_PROJECTS", "true")
+    assert (
+        format_keep_for(
+            "Projects: Trophy Display (10x), Expedition 1 (5x)",
+            paused_projects={"expedition"},
+        )
+        == "Projects: Trophy Display (10x)"
+    )
+
+
+def test_format_keep_for_sorts_paused_last_when_enabled(monkeypatch):
+    monkeypatch.setenv("DISABLE_PAUSED_PROJECTS", "false")
+    assert (
+        format_keep_for(
+            "Projects: Expedition 1 (5x), Trophy Display (10x)",
+            paused_projects={"expedition"},
+        )
+        == "Projects: Trophy Display (10x), Expedition 1 (5x)"
+    )
+
+
 def test_workshop_itemgrid_prefers_price_over_buggy_qty():
     """ItemGrid priceN wins when qty= was copied from a sibling material."""
     wikitext = """

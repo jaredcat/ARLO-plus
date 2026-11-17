@@ -326,6 +326,23 @@ def _format_entries(entries: list[tuple[str, int]]) -> str:
     return ", ".join(f"{label} ({qty}x)" for label, qty in entries)
 
 
+def _sort_projects_paused_last(
+    entries: list[tuple[str, int]],
+    project_catalog: ProjectCatalog | None,
+) -> list[tuple[str, int]]:
+    """Keep PAUSED catalog projects at the end of the Projects: list."""
+    if project_catalog is None or not entries:
+        return entries
+    active: list[tuple[str, int]] = []
+    paused: list[tuple[str, int]] = []
+    for label, qty in entries:
+        if project_catalog.is_paused(label):
+            paused.append((label, qty))
+        else:
+            active.append((label, qty))
+    return [*active, *paused]
+
+
 def _quest_done(profile: ProgressProfile, quest_label: str) -> bool:
     return slugify(quest_label) in profile.completed_quests
 
@@ -710,11 +727,14 @@ def _filter_non_quest_entries(
     project_catalog: ProjectCatalog | None,
 ) -> list[tuple[str, int]]:
     """Filter Workshop / Projects / Research / Crafting / Amplify entries."""
-    return [
+    kept = [
         (label, qty)
         for label, qty in entries
         if not _entry_done(kind, label, profile, item_name, project_catalog)
     ]
+    if kind == "Projects":
+        return _sort_projects_paused_last(kept, project_catalog)
+    return kept
 
 
 def _process_keep_for_chunk(

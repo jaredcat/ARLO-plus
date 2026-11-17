@@ -175,6 +175,8 @@ class Scanner:
     _wayland_stable: bool = False
     _trigger_miss_streak: int = 0
     _TRIGGER_MISS_LIMIT: ClassVar[int] = 2
+    # True after we posted map_mode True until a closed probe succeeds.
+    _map_idle_active: bool = False
 
     # Hotkey override (Ctrl+Shift to force tooltip scanning)
     _hotkey_override: bool = False
@@ -229,6 +231,7 @@ class Scanner:
         """Handle IDLE phase; return True to ``continue`` the outer loop."""
         idle_interval = settings.scan.idle_scan_interval
         if MapSyncEngine.detect_map_open():
+            self._map_idle_active = True
             self._set_capture_live(enabled=True)
             self._update_status("map")
             self.ui_queue.put(("map_mode", True))
@@ -236,6 +239,9 @@ class Scanner:
             self.stats.trigger_scans += 1
             return True
 
+        if self._map_idle_active:
+            self._map_idle_active = False
+            logger.info("MAP closed - hiding in-game pins")
         self.ui_queue.put(("map_mode", False))
         self._update_status("scanning")
 
@@ -278,15 +284,17 @@ class Scanner:
                 self._enter_idle("Hotkey released - returning to idle")
                 return True
         else:
+            # Inventory every tick so Wayland cannot linger on a stale INVENTORY
+            # frame; map chrome is cheaper to sample less often.
             self._trigger_check_counter += 1
-            if self._trigger_check_counter % 3 == 0:
-                if MapSyncEngine.detect_map_open():
-                    self._enter_idle("MAP screen open - leaving inventory scan")
-                    self.ui_queue.put(("map_mode", True))
-                    return True
-                if self._inventory_closed(ocr, settings):
-                    self._enter_idle("INVENTORY closed - returning to idle")
-                    return True
+            if self._trigger_check_counter % 3 == 0 and MapSyncEngine.detect_map_open():
+                self._map_idle_active = True
+                self._enter_idle("MAP screen open - leaving inventory scan")
+                self.ui_queue.put(("map_mode", True))
+                return True
+            if self._inventory_closed(ocr, settings):
+                self._enter_idle("INVENTORY closed - returning to idle")
+                return True
         return False
 
     def _active_scan_step(self, ocr: OCREngine, settings: Settings) -> None:
@@ -344,7 +352,9 @@ class Scanner:
         self._in_raid = False
         self._trigger_miss_streak = 0
         self._last_shown_item = ""
-        self._set_capture_live(enabled=False)
+        # Keep live capture if we are handing off to map mode (caller sets flag).
+        if not self._map_idle_active:
+            self._set_capture_live(enabled=False)
         if self._wayland_stable:
             self.ui_queue.put(("overlay_hide",))
         self._update_status("scanning")

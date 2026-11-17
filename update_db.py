@@ -37,6 +37,7 @@ import contextlib
 import csv
 import html
 import operator
+import os
 import re
 import sqlite3
 import sys
@@ -1685,12 +1686,24 @@ def parse_wiki_date(value: str) -> date | None:
     return None
 
 
+def _disable_paused_projects() -> bool:
+    """Match runtime ``DISABLE_PAUSED_PROJECTS`` (default true)."""
+    raw = os.environ.get("DISABLE_PAUSED_PROJECTS", "true").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def project_type_is_paused(project: dict) -> bool:
+    return str(project.get("project_type") or "").strip().upper() == "PAUSED"
+
+
 def project_is_active(
     project: dict,
     *,
     today: date | None = None,
 ) -> bool:
-    """True when the project has no end date or ``today`` is on/before it."""
+    """True when the project is not expired and not a disabled PAUSED type."""
+    if _disable_paused_projects() and project_type_is_paused(project):
+        return False
     today = today or datetime.now(UTC).date()
     end = parse_wiki_date(str(project.get("ends_on") or ""))
     if end is None:
@@ -2179,13 +2192,14 @@ def write_traders_catalog(
     )
 
 
-def persist_wiki_side_catalogs() -> tuple[dict[str, list[str]], set[str]]:
+def persist_wiki_side_catalogs() -> tuple[dict[str, list[str]], set[str], set[str]]:
     """Scrape + write projects/traders catalogs.
 
-    Returns ``(project_item_map, inactive_project_names_lower)``.
+    Returns ``(project_item_map, inactive_names_lower, paused_names_lower)``.
     """
     project_map: dict[str, list[str]] = {}
     inactive: set[str] = set()
+    paused: set[str] = set()
     try:
         projects = scrape_wiki_projects()
         if projects:
@@ -2195,6 +2209,11 @@ def persist_wiki_side_catalogs() -> tuple[dict[str, list[str]], set[str]]:
                 for p in projects
                 if p.get("name") and not project_is_active(p)
             }
+            paused = {
+                str(p.get("name") or "").strip().lower()
+                for p in projects
+                if p.get("name") and project_type_is_paused(p)
+            }
     except Exception as e:
         print(f"  Projects catalog skipped ({e})")
     try:
@@ -2203,7 +2222,7 @@ def persist_wiki_side_catalogs() -> tuple[dict[str, list[str]], set[str]]:
             write_traders_catalog(traders)
     except Exception as e:
         print(f"  Traders catalog skipped ({e})")
-    return project_map, inactive
+    return project_map, inactive, paused
 
 
 def _parse_recycles_to(cell: Any) -> str:
@@ -2424,8 +2443,9 @@ def fetch_items_hybrid(*, persist_side_catalogs: bool = True) -> list[GameItem]:
 
     project_map: dict[str, list[str]] = {}
     inactive_projects: set[str] = set()
+    paused_projects: set[str] = set()
     if persist_side_catalogs:
-        project_map, inactive_projects = persist_wiki_side_catalogs()
+        project_map, inactive_projects, paused_projects = persist_wiki_side_catalogs()
 
     # 3. Combine into GameItems
     items: list[GameItem] = []
@@ -2446,6 +2466,7 @@ def fetch_items_hybrid(*, persist_side_catalogs: bool = True) -> list[GameItem]:
             quest_map.get(name.lower(), []),
             project_map.get(name.lower(), []),
             inactive_projects=inactive_projects,
+            paused_projects=paused_projects,
         )
 
         items.append(
@@ -2597,12 +2618,37 @@ def _prefer_staged_project_labels(project_entries: list[str]) -> list[str]:
     ]
 
 
+def _project_entry_is_paused(entry: str, paused_projects: set[str]) -> bool:
+    """True when the entry's project (or staged base) is in the paused set."""
+    if not paused_projects:
+        return False
+    pname = _keep_entry_label(entry).lower()
+    base = _TRAILING_TIER_RE.sub("", pname).strip()
+    return pname in paused_projects or base in paused_projects
+
+
+def _sort_paused_project_entries_last(
+    project_entries: list[str], paused_projects: set[str]
+) -> list[str]:
+    """Move PAUSED catalog projects to the end of the Projects: list."""
+    if not paused_projects or not project_entries:
+        return project_entries
+    active = [
+        e for e in project_entries if not _project_entry_is_paused(e, paused_projects)
+    ]
+    paused = [
+        e for e in project_entries if _project_entry_is_paused(e, paused_projects)
+    ]
+    return [*active, *paused]
+
+
 def format_keep_for(
     wiki_uses: str = "",
     quest_uses: list[str] | None = None,
     project_uses: list[str] | None = None,
     *,
     inactive_projects: set[str] | None = None,
+    paused_projects: set[str] | None = None,
 ) -> str:
     """Build a consistent keep_for string from wiki uses + quests + projects.
 
@@ -2610,6 +2656,8 @@ def format_keep_for(
     requirements are merged into a single ``Projects:`` section (wiki Uses may
     already list Expedition tiers; catalog projects append to that same section).
     Expired temporary projects in ``inactive_projects`` are omitted.
+    ``paused_projects`` are omitted when ``DISABLE_PAUSED_PROJECTS`` is on
+    (default); otherwise they are kept but sorted last.
     Workshop text stays in the wiki portion.
     """
     wiki = normalize_keep_labels(wiki_uses or "")
@@ -2619,6 +2667,14 @@ def format_keep_for(
         for n in (inactive_projects or set())
         if n.strip()
     }
+    paused = {
+        html.unescape(n).strip().lower()
+        for n in (paused_projects or set())
+        if n.strip()
+    }
+    if _disable_paused_projects():
+        inactive |= paused
+        paused = set()
 
     preamble_parts, project_entries = _split_wiki_keep_sections(wiki, inactive)
     quest_entries = _quest_entries_not_in_wiki(quest_uses or [], wiki_lower)
@@ -2630,6 +2686,7 @@ def format_keep_for(
     )
     project_entries = _prefer_staged_project_labels(project_entries)
     project_entries = _dedupe_keep_entries(project_entries)
+    project_entries = _sort_paused_project_entries_last(project_entries, paused)
     quest_entries = _dedupe_keep_entries(quest_entries)
 
     parts = list(preamble_parts)
@@ -3361,8 +3418,9 @@ def fetch_items_from_metaforge_only(
     quest_map = fetch_metaforge_quest_items(persist=persist_side_catalogs)
     project_map: dict[str, list[str]] = {}
     inactive_projects: set[str] = set()
+    paused_projects: set[str] = set()
     if persist_side_catalogs:
-        project_map, inactive_projects = persist_wiki_side_catalogs()
+        project_map, inactive_projects, paused_projects = persist_wiki_side_catalogs()
 
     items: list[GameItem] = []
     for raw in raw_items:
@@ -3383,6 +3441,7 @@ def fetch_items_from_metaforge_only(
                     quest_map.get(name.lower(), []),
                     project_map.get(name.lower(), []),
                     inactive_projects=inactive_projects,
+                    paused_projects=paused_projects,
                 ),
             )
         )

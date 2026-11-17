@@ -297,6 +297,13 @@ class Settings(BaseSettings):
         default="auto", description="Screen backend: auto, x11 or wayland"
     )
 
+    # Hide keep_for / catalog need for projects whose Type is PAUSED (e.g. Expedition).
+    # When false, paused projects still appear but are sorted last in Projects:.
+    disable_paused_projects: bool = Field(
+        default=True,
+        description="Omit PAUSED project types from keep recommendations",
+    )
+
     # Hold-to-scan hotkey, evdev key name (Wayland/Linux only)
     hotkey_key: str = Field(
         default="KEY_RIGHTCTRL", description="evdev key name for hold-to-scan"
@@ -364,6 +371,7 @@ class Settings(BaseSettings):
             "# Platform settings",
             f"SCREEN_BACKEND={self.screen_backend}",
             f"HOTKEY_KEY={self.hotkey_key}",
+            f"DISABLE_PAUSED_PROJECTS={str(self.disable_paused_projects).lower()}",
             "",
             "# Companion map",
             f"MAP_HOTKEY={self.map_hotkey}",

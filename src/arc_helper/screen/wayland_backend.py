@@ -51,8 +51,16 @@ KEEPALIVE_MS = 500
 # (monitor hotplug, tray "Stop sharing", competing ScreenCast clients).
 RESTART_COOLDOWN_S = 2.0
 _FIRST_FRAME_POLL_S = 0.1
-# After unpausing for an idle probe, wait briefly for a fresh sample.
-_WAKE_PULL_TIMEOUT_S = 0.25
+# Wait at least one PipeWire keepalive so a quiet UI still yields a sample.
+_WAKE_PULL_TIMEOUT_S = 0.55
+_LIVE_PULL_TIMEOUT_S = 0.55
+# Quiet inventory/map ScreenCast is often damage-driven; allow ~2 keepalives of
+# reuse for anti-flicker before treating the stream as stalled.
+_MAX_REUSE_AGE_S = 2.0
+# Extra blocking wait before nudge/reconnect when reuse budget is exhausted.
+_STALL_PULL_TIMEOUT_S = 1.0
+# PAUSED↔PLAYING nudge is disruptive; do not spam it on sparse-but-healthy streams.
+_NUDGE_COOLDOWN_S = 5.0
 
 
 class WaylandBackend:
@@ -65,11 +73,13 @@ class WaylandBackend:
         self._pipeline: Gst.Element | None = None
         self._lock = threading.Lock()
         self._frame: tuple[bytes, int, int, int] | None = None  # data, w, h, stride
+        self._frame_at = 0.0  # monotonic time of last successful pull
         self._size: tuple[int, int] = (0, 0)
         self._tk_scale = 1.0
         self._restart_lock = threading.Lock()
         self._pipeline_state_lock = threading.Lock()
         self._last_restart_at = 0.0
+        self._last_nudge_at = 0.0
         # True while inventory/map scanning needs a steady stream; False during
         # gameplay idle (pipeline PAUSED between sparse trigger probes).
         self._live_capture = True
@@ -79,7 +89,7 @@ class WaylandBackend:
 
     def start(self) -> None:
         Gst.init(None)
-        self._frame = None
+        self._clear_frame_cache()
 
         try:
             self._session = ScreenCastSession(restore_token=load_token())
@@ -179,7 +189,18 @@ class WaylandBackend:
             if self._live_capture == enabled:
                 return
             self._live_capture = enabled
+            # Drop the cached sample so the next grab cannot OCR a pre-toggle
+            # frame (e.g. stuck INVENTORY after closing the menu).
+            self._clear_frame_cache()
             self._set_pipeline_playing(playing=enabled)
+
+    def invalidate_cached_frame(self) -> None:
+        """Drop the last sample so the next ``grab`` must pull a new one.
+
+        Used before map/inventory exit checks — a closed UI must not be OCR'd
+        from the buffer that was captured while it was still open.
+        """
+        self._clear_frame_cache()
 
     def grab(self, bbox: tuple[int, int, int, int]) -> Image.Image:
         if self._terminal_error is not None:
@@ -187,29 +208,23 @@ class WaylandBackend:
         session = self._session  # local ref: stop() may null it concurrently
         if session is None or session.closed.is_set():
             self._attempt_restart()
-        with self._pipeline_state_lock:
-            live = self._live_capture
-            if not live:
-                self._set_pipeline_playing(playing=True)
-            try:
-                if live:
-                    # Steady stream: take a newer sample if waiting; else reuse.
-                    self._try_pull_frame(timeout_ns=0)
-                else:
-                    # Brief wake for an idle inventory/map probe.
-                    timeout_ns = int(_WAKE_PULL_TIMEOUT_S * Gst.SECOND)
-                    if not self._try_pull_frame(timeout_ns=timeout_ns):
-                        self._try_pull_frame(timeout_ns=0)
-                with self._lock:
-                    frame = self._frame
-            finally:
-                if not live:
-                    self._set_pipeline_playing(playing=False)
-        if frame is None:
-            msg = "No frame received from the compositor yet"
-            raise OSError(msg)
-        data, width, height, stride = frame
-        return crop_bgrx(data, width, height, stride, bbox)
+
+        image = self._grab_cropped(bbox)
+        if image is not None:
+            return image
+
+        # Portal session can stay "open" while PipeWire stops delivering.
+        # Reuse budget already expired — reconnect instead of OCR'ing a corpse.
+        logger.warning(
+            "ScreenCast produced no frame within %.0fms — forcing reconnect",
+            _MAX_REUSE_AGE_S * 1000,
+        )
+        self._force_stream_restart()
+        image = self._grab_cropped(bbox)
+        if image is not None:
+            return image
+        msg = "No frame received from the compositor yet"
+        raise OSError(msg)
 
     def cursor_position(self) -> Point:
         # Wayland has no global cursor query. Xlib coordinates are valid
@@ -232,6 +247,24 @@ class WaylandBackend:
 
     # ------------------------------------------------------------------
 
+    def _grab_cropped(self, bbox: tuple[int, int, int, int]) -> Image.Image | None:
+        """One pull+crop attempt. ``None`` when no usable frame (stall)."""
+        with self._pipeline_state_lock:
+            live = self._live_capture
+            if not live:
+                self._set_pipeline_playing(playing=True)
+            try:
+                self._pull_fresh_frame(live=live)
+                with self._lock:
+                    frame = self._frame
+            finally:
+                if not live:
+                    self._set_pipeline_playing(playing=False)
+        if frame is None:
+            return None
+        data, width, height, stride = frame
+        return crop_bgrx(data, width, height, stride, bbox)
+
     def _set_pipeline_playing(self, *, playing: bool) -> None:
         """PLAYING vs PAUSED. Caller holds ``_pipeline_state_lock`` when racing grab."""
         pipeline = self._pipeline
@@ -245,6 +278,82 @@ class WaylandBackend:
                 label,
                 self._collect_bus_error(),
             )
+
+    def _clear_frame_cache(self) -> None:
+        with self._lock:
+            self._frame = None
+            self._frame_at = 0.0
+
+    def _frame_age_s(self) -> float:
+        with self._lock:
+            if self._frame is None or self._frame_at <= 0:
+                return 1e9
+            return time.monotonic() - self._frame_at
+
+    def _pull_fresh_frame(self, *, live: bool) -> None:
+        """Update ``_frame`` from appsink.
+
+        Brief reuse (≤ ``_MAX_REUSE_AGE_S``) avoids tooltip flicker when a pull
+        barely misses the next sample. If the budget is exhausted, wait longer
+        first — only nudge when that also fails (nudge itself can starve PipeWire).
+        """
+        timeout_s = _LIVE_PULL_TIMEOUT_S if live else _WAKE_PULL_TIMEOUT_S
+        timeout_ns = int(timeout_s * Gst.SECOND)
+        if self._try_pull_frame(timeout_ns=timeout_ns):
+            return
+
+        with self._lock:
+            has_frame = self._frame is not None
+            age = (
+                time.monotonic() - self._frame_at
+                if has_frame and self._frame_at > 0
+                else 1e9
+            )
+        if has_frame and age <= _MAX_REUSE_AGE_S:
+            # Anti-flicker: keep the recent sample; opportunistic non-blocking upgrade.
+            self._try_pull_frame(timeout_ns=0)
+            return
+
+        stall_ns = int(_STALL_PULL_TIMEOUT_S * Gst.SECOND)
+        # Prefer a late sample over pipeline thrash (quiet UI often gaps 1–2s).
+        if self._try_pull_frame(timeout_ns=stall_ns):
+            return
+
+        if not self._nudge_pipeline():
+            # Rate-limited: keep the aged buffer. Clearing here previously left
+            # ``_frame is None`` and triggered a force-reconnect mid-inventory.
+            return
+
+        if has_frame:
+            logger.warning(
+                "ScreenCast frame stall (cache age %.0fms) — nudged pipeline",
+                age * 1000.0,
+            )
+            self._clear_frame_cache()
+        else:
+            logger.warning(
+                "ScreenCast no frame after %.0fms wait — nudged pipeline",
+                (_LIVE_PULL_TIMEOUT_S + _STALL_PULL_TIMEOUT_S) * 1000,
+            )
+        self._try_pull_frame(timeout_ns=stall_ns)
+
+    def _nudge_pipeline(self) -> bool:
+        """Kick a wedged pipeline. Return True if a kick was applied.
+
+        While live, only re-assert PLAYING — a PAUSED↔PLAYING cycle during
+        inventory was starving appsink and leading to force-reconnect.
+        """
+        now = time.monotonic()
+        if self._last_nudge_at > 0 and now - self._last_nudge_at < _NUDGE_COOLDOWN_S:
+            return False
+        self._last_nudge_at = now
+        self._collect_bus_error()  # drain so a stuck ERROR does not block state changes
+        if self._live_capture:
+            self._set_pipeline_playing(playing=True)
+        else:
+            self._set_pipeline_playing(playing=False)
+            self._set_pipeline_playing(playing=True)
+        return True
 
     def _try_pull_frame(self, *, timeout_ns: int = 0) -> bool:
         """Pull one appsink sample into ``_frame``. Return True if updated."""
@@ -284,6 +393,7 @@ class WaylandBackend:
             stride = len(data) // height  # defensive: tightly packed buffer
         with self._lock:
             self._frame = (data, width, height, stride)
+            self._frame_at = time.monotonic()
         return True
 
     def _collect_bus_error(self) -> str:
@@ -312,16 +422,31 @@ class WaylandBackend:
             return 0  # compute_scale(.., 0) -> 1.0
         return width
 
-    def _attempt_restart(self) -> None:
+    def _force_stream_restart(self) -> None:
+        """Reconnect even when the portal session still looks open.
+
+        A wedged PipeWire stream leaves ``session.closed`` unset while appsink
+        never yields samples — the normal closed-session restart never fires.
+        """
+        want_live = self._live_capture
+        self._attempt_restart(force=True)
+        if want_live:
+            # ``start()`` leaves capture paused; restore inventory/map live mode.
+            self.set_live_capture(enabled=True)
+
+    def _attempt_restart(self, *, force: bool = False) -> None:
         """Reconnect ScreenCast after the compositor/user closes the session.
 
         Retries indefinitely with a cooldown. Failures raise plain OSError so
         OCR can soft-fail (black frame) and the next scan tick tries again —
         typically via the restore token without another dialog.
+
+        ``force=True`` rebuilds even when the portal session is still open
+        (PipeWire stall with a live D-Bus session).
         """
         with self._restart_lock:
             session = self._session
-            if session is not None and not session.closed.is_set():
+            if not force and session is not None and not session.closed.is_set():
                 return  # another grab() already recovered
             now = time.monotonic()
             elapsed = now - self._last_restart_at
@@ -330,7 +455,10 @@ class WaylandBackend:
                 msg = f"Screen share reconnecting (retry in {remaining:.1f}s)"
                 raise OSError(msg)
             self._last_restart_at = now
-            logger.warning("Portal session closed - reconnecting screen share")
+            if force:
+                logger.warning("Forcing ScreenCast reconnect after frame stall")
+            else:
+                logger.warning("Portal session closed - reconnecting screen share")
             self.stop()
             try:
                 self.start()
