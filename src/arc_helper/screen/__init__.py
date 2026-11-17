@@ -21,6 +21,7 @@ __all__ = [
     "get_backend",
     "phys_to_tk",
     "reset_backend",
+    "set_live_capture",
 ]
 
 _backend: ScreenBackend | None = None  # ruff: ignore[non-empty-init-module]
@@ -67,3 +68,15 @@ def reset_backend() -> None:  # ruff: ignore[non-empty-init-module]
 def phys_to_tk(value: float) -> int:  # ruff: ignore[non-empty-init-module]
     """Convert physical pixels to window (logical) coordinates."""
     return round(value / get_backend().tk_scale)
+
+
+def set_live_capture(*, enabled: bool) -> None:  # ruff: ignore[non-empty-init-module]
+    """Hint the backend to keep capture hot (inventory/map) or idle-paused.
+
+    Wayland pauses the GStreamer pipeline between sparse probes during
+    gameplay; mss backends no-op (already on-demand).
+    """
+    backend = get_backend()
+    setter = getattr(backend, "set_live_capture", None)
+    if setter is not None:
+        setter(enabled=enabled)

@@ -227,10 +227,12 @@ class Scanner:
         self, *, hotkey_now: bool, ocr: OCREngine, settings: Settings
     ) -> bool:
         """Handle IDLE phase; return True to ``continue`` the outer loop."""
+        idle_interval = settings.scan.idle_scan_interval
         if MapSyncEngine.detect_map_open():
+            self._set_capture_live(enabled=True)
             self._update_status("map")
             self.ui_queue.put(("map_mode", True))
-            time.sleep(settings.scan.trigger_scan_interval)
+            time.sleep(idle_interval)
             self.stats.trigger_scans += 1
             return True
 
@@ -242,6 +244,7 @@ class Scanner:
             self._in_raid = False
             self.state = ScannerState.ACTIVE
             self._trigger_miss_streak = 0
+            self._set_capture_live(enabled=True)
             self._update_status("hotkey")
             logger.info("Hotkey override - activating tooltip scanner")
         else:
@@ -253,13 +256,15 @@ class Scanner:
                 self._in_raid = trigger_idx == 1  # region2 = in-raid
                 self.state = ScannerState.ACTIVE
                 self._trigger_miss_streak = 0
+                self._set_capture_live(enabled=True)
                 self._update_status("active")
                 context = "in-raid" if self._in_raid else "menu"
                 logger.info(
                     "INVENTORY detected (%s) - activating tooltip scanner", context
                 )
             else:
-                time.sleep(settings.scan.trigger_scan_interval)
+                self._set_capture_live(enabled=False)
+                time.sleep(idle_interval)
         self.stats.trigger_scans += 1
         return False
 
@@ -339,10 +344,19 @@ class Scanner:
         self._in_raid = False
         self._trigger_miss_streak = 0
         self._last_shown_item = ""
+        self._set_capture_live(enabled=False)
         if self._wayland_stable:
             self.ui_queue.put(("overlay_hide",))
         self._update_status("scanning")
         logger.info(reason)
+
+    def _set_capture_live(self, *, enabled: bool) -> None:
+        """Keep Wayland ScreenCast hot for inventory/map; pause during gameplay."""
+        if not self._wayland_stable:
+            return
+        from arc_helper.screen import set_live_capture
+
+        set_live_capture(enabled=enabled)
 
     def _inventory_closed(self, ocr: OCREngine, settings: Settings) -> bool:
         """True if the INVENTORY trigger is gone.
@@ -985,9 +999,7 @@ class Application:
             f"  Size: {self.settings.trigger_region2.width}x{self.settings.trigger_region2.height}"
         )
         logger.info("=" * 50)
-        logger.info(
-            f"Trigger scan interval: {self.settings.scan.trigger_scan_interval}s"
-        )
+        logger.info(f"Idle scan interval: {self.settings.scan.idle_scan_interval}s")
         logger.info(
             f"Tooltip scan interval: {self.settings.scan.tooltip_scan_interval}s"
         )

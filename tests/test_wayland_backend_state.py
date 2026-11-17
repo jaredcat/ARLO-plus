@@ -71,3 +71,66 @@ def test_stop_before_start_is_safe():
     backend = WaylandBackend()
     backend.stop()
     backend.stop()
+
+
+def test_try_pull_frame_without_pipeline_is_false():
+    backend = WaylandBackend()
+    assert backend._try_pull_frame(timeout_ns=0) is False
+
+
+def test_grab_pulls_before_crop(monkeypatch: pytest.MonkeyPatch):
+    backend = WaylandBackend()
+    backend._session = MagicMock()
+    backend._session.closed.is_set.return_value = False
+    backend._live_capture = True
+    backend._frame = (b"\x00" * 16, 2, 2, 8)
+    pulled: list[bool] = []
+
+    def _pull(*, timeout_ns: int = 0) -> bool:
+        pulled.append(True)
+        return False
+
+    monkeypatch.setattr(backend, "_try_pull_frame", _pull)
+    monkeypatch.setattr(backend, "_set_pipeline_playing", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "arc_helper.screen.wayland_backend.crop_bgrx",
+        lambda *_a, **_k: MagicMock(name="image"),
+    )
+    backend.grab((0, 0, 1, 1))
+    assert pulled
+
+
+def test_set_live_capture_toggles_pipeline(monkeypatch: pytest.MonkeyPatch):
+    backend = WaylandBackend()
+    states: list[bool] = []
+
+    def _track(*, playing: bool) -> None:
+        states.append(playing)
+
+    monkeypatch.setattr(backend, "_set_pipeline_playing", _track)
+    backend._live_capture = True
+    backend.set_live_capture(enabled=False)
+    backend.set_live_capture(enabled=False)  # no-op
+    backend.set_live_capture(enabled=True)
+    assert states == [False, True]
+
+
+def test_idle_grab_wakes_and_repauses(monkeypatch: pytest.MonkeyPatch):
+    backend = WaylandBackend()
+    backend._session = MagicMock()
+    backend._session.closed.is_set.return_value = False
+    backend._live_capture = False
+    backend._frame = (b"\x00" * 16, 2, 2, 8)
+    play_states: list[bool] = []
+
+    def _track(*, playing: bool) -> None:
+        play_states.append(playing)
+
+    monkeypatch.setattr(backend, "_set_pipeline_playing", _track)
+    monkeypatch.setattr(backend, "_try_pull_frame", lambda **_k: True)
+    monkeypatch.setattr(
+        "arc_helper.screen.wayland_backend.crop_bgrx",
+        lambda *_a, **_k: MagicMock(name="image"),
+    )
+    backend.grab((0, 0, 1, 1))
+    assert play_states == [True, False]

@@ -253,6 +253,13 @@ class ScanSettings(BaseSettings):
     trigger_scan_interval: float = Field(
         default=0.5, description="Seconds between trigger scans"
     )
+    idle_scan_interval: float = Field(
+        default=1.0,
+        description=(
+            "Seconds between inventory/map probes while not in inventory "
+            "(gameplay); longer = less capture wakeups"
+        ),
+    )
     tooltip_scan_interval: float = Field(
         default=0.3, description="Seconds between tooltip scans"
     )
@@ -347,6 +354,7 @@ class Settings(BaseSettings):
             "",
             "# Scan intervals",
             f"TRIGGER_SCAN_INTERVAL={self.scan.trigger_scan_interval}",
+            f"IDLE_SCAN_INTERVAL={self.scan.idle_scan_interval}",
             f"TOOLTIP_SCAN_INTERVAL={self.scan.tooltip_scan_interval}",
             "",
             "# Debug settings",

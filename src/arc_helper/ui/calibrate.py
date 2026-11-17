@@ -351,6 +351,7 @@ class CalibrationTool(QWidget):
             ),
             scan=ScanSettings(
                 trigger_scan_interval=self.settings.scan.trigger_scan_interval,
+                idle_scan_interval=self.settings.scan.idle_scan_interval,
                 tooltip_scan_interval=self.settings.scan.tooltip_scan_interval,
             ),
             map_trigger_region=self.settings.map_trigger_region,
