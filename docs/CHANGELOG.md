@@ -4,9 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Versions
 
+### [1.0.2]
+
+- Wayland: auto-reconnect ScreenCast after the portal session drops (no permanent Error latch)
+- Wayland: cut gameplay frame-time cost — on-demand frame pulls, leaky pre-convert queue, pause capture while idle
+- Add `IDLE_SCAN_INTERVAL` (default 1s) so inventory/map probes are slower during active play
+- Refactor oversized `update_db.py` catalog helpers without changing scrape behavior
+
 ### [1.0.1]
 
-- Fix issues flagged by sonarqube
+- Fix SonarQube findings (complexity/smells) and wire coverage + Python version into the scan
 
 ### [1.0.0]
 
