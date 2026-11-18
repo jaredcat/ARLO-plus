@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Versions
 
+### [1.0.3]
+
+- Add icon
+
 ### [1.0.2]
 
 - Wayland: auto-reconnect ScreenCast after the portal session drops (no permanent Error latch)
