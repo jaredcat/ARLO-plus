@@ -14,7 +14,11 @@ a = Analysis(
     ['src/arc_helper/main.py'],
     pathex=[],
     binaries=binaries,
-    datas=[],
+    datas=[
+        ('static/ARLO.png', 'static'),
+        ('static/ARLO.ico', 'static'),
+        ('static/map_sync/player_arrow.png', 'static/map_sync'),
+    ],
     hiddenimports=[
         'pydantic',
         'pydantic_settings',
@@ -53,6 +57,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='static/ARLO.ico',
 )
 
 coll = COLLECT(

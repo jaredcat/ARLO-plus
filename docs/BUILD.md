@@ -29,6 +29,10 @@ dist/ARLO/
 ├── ARLO.exe    # Main application (shows console window)
 ├── Calibrate.exe           # Calibration tool (GUI only)
 ├── _internal/              # Python dependencies (don't modify)
+├── static/                 # App icon + map-sync UI assets
+│   ├── ARLO.png
+│   ├── ARLO.ico
+│   └── map_sync/
 ├── tesseract/              # Bundled Tesseract OCR
 │   ├── tesseract.exe
 │   ├── *.dll

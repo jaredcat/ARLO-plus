@@ -36,6 +36,21 @@ def get_app_dir() -> Path:
 APP_DIR = get_app_dir()
 DATA_DIR = APP_DIR / "data"
 
+
+def app_icon_path() -> Path | None:
+    """Resolve the app icon (bundled ``static/`` or repo tree)."""
+    candidates = (
+        APP_DIR / "static" / "ARLO.png",
+        # Frozen layouts sometimes keep datas next to the exe under _internal.
+        APP_DIR / "_internal" / "static" / "ARLO.png",
+        Path(__file__).resolve().parents[2] / "static" / "ARLO.png",
+    )
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
 _DESC_TRIGGER_LEFT = "Left edge of trigger region"
 _DESC_TRIGGER_TOP = "Top edge of trigger region"
 _DESC_TRIGGER_WIDTH = "Width of trigger region"

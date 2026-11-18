@@ -49,10 +49,7 @@ def build():
     logger.info("Building calibration tool...")
     PyInstaller.__main__.run(
         [
-            "src/arc_helper/calibrate.py",
-            "--name=Calibrate",
-            "--onedir",
-            "--windowed",
+            "Calibrate.spec",
             "--distpath",
             str(DIST),
             "--clean",
@@ -97,6 +94,19 @@ def build():
     )
     if (ROOT / "README.md").exists():
         shutil.copy(ROOT / "README.md", OUTPUT / "README.md")
+
+    # App icon + map-sync UI assets (also listed in *.spec datas)
+    static_dest = OUTPUT / "static"
+    static_dest.mkdir(exist_ok=True)
+    for name in ("ARLO.png", "ARLO.ico"):
+        src = ROOT / "static" / name
+        if src.exists():
+            shutil.copy(src, static_dest / name)
+    arrow = ROOT / "static" / "map_sync" / "player_arrow.png"
+    if arrow.exists():
+        map_sync_dest = static_dest / "map_sync"
+        map_sync_dest.mkdir(exist_ok=True)
+        shutil.copy(arrow, map_sync_dest / "player_arrow.png")
 
     # Bundle Tesseract
     tesseract_dest = OUTPUT / "tesseract"

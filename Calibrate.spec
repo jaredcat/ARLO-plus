@@ -5,7 +5,10 @@ a = Analysis(
     ['src\\arc_helper\\calibrate.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('static/ARLO.png', 'static'),
+        ('static/ARLO.ico', 'static'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -32,6 +35,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='static/ARLO.ico',
 )
 coll = COLLECT(
     exe,
