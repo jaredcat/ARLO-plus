@@ -78,6 +78,7 @@ from arc_helper.ui import MapWindow
 from arc_helper.ui import OverlayPin
 from arc_helper.ui import OverlayWindow
 from arc_helper.ui import StatusWindow
+from arc_helper.ui import apply_app_icon
 from arc_helper.ui import prepare_qt_env
 from arc_helper.ui.platform import apply_overlay_flags
 
@@ -519,6 +520,7 @@ class Application:
         self.app = (
             existing if isinstance(existing, QApplication) else QApplication(sys.argv)
         )
+        apply_app_icon(self.app)
         self.app.setQuitOnLastWindowClosed(False)
         self.root = None
 

@@ -1,5 +1,9 @@
 # ARLO - Arc Raiders Loot Overlay
 
+<p align="center">
+  <img src="static/ARLO.png" alt="ARLO" width="128" height="128">
+</p>
+
 > Fork of [Soygen/ARLO](https://github.com/Soygen/ARLO), which builds on [Pabosik/PabsArcTooltip](https://github.com/Pabosik/PabsArcTooltip). The OCR tooltip overlay idea is Pabosik’s; Soygen named and packaged ARLO. This repo ([jaredcat/arlo-plus](https://github.com/jaredcat/arlo-plus)) is the actively maintained line — 1.0.0 ships a Qt (PySide6) UI and in-game map pins.
 
 A screen overlay tool for [Arc Raiders](https://store.steampowered.com/app/2073750/ARC_Raiders/) that detects items in your inventory and displays recommended actions (**keep**, **recycle**, **sell**) along with stack sizes, crafting details, and (in raid) sell prices. The item database auto-syncs from the [MetaForge API](https://metaforge.app/arc-raiders) on every launch.
@@ -88,25 +92,25 @@ git clone https://github.com/jaredcat/arlo-plus.git
 cd arlo-plus
 ```
 
-2. Install dependencies:
+1. Install dependencies:
 
 ```
 uv sync --all-extras
 ```
 
-3. Install [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki):
+1. Install [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki):
 
    - **Windows:** install to `C:\Program Files\Tesseract-OCR\` (or set `TESSERACT_PATH` in `.env`)
    - **Linux:** `sudo apt install tesseract-ocr` or `nix-env -i tesseract` (must be on `$PATH`)
    - **NixOS:** Use the provided flake (see [NixOS](#nixos) below)
 
-4. Copy the example config:
+2. Copy the example config:
 
 ```
 copy .env.example .env
 ```
 
-5. Launch the app:
+1. Launch the app:
 
 ```
 uv run arc-helper
@@ -124,7 +128,7 @@ The project includes a `flake.nix` so you can build the Python dependency `evdev
 nix develop
 ```
 
-2. Install dependencies and run the app:
+1. Install dependencies and run the app:
 
 ```
 uv sync --all-extras
@@ -192,7 +196,6 @@ uv run python update_db.py --maps-only    # Refresh map markers (+ basemaps if M
 uv run python update_db.py --maps-only --force-map-assets  # Re-stitch all basemap PNGs
 uv run python update_db.py --skip-maps    # Item/quest update without map sync
 ```
-
 
 Or use the makefile shortcuts:
 
@@ -312,7 +315,7 @@ ARLO/
 │   ├── BUILD.md                    # Build instructions
 │   ├── TROUBLESHOOTING.md          # Common issues
 │   └── CHANGELOG.md                # Version history
-└── static/                         # Screenshots
+└── static/                         # App icon, screenshots, map-sync UI assets
 ```
 
 ---

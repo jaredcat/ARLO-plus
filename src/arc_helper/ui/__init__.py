@@ -4,6 +4,7 @@ from .map_pins import InGameMapPins
 from .map_pins import OverlayPin
 from .map_window import MapWindow
 from .overlay import OverlayWindow
+from .platform import apply_app_icon
 from .platform import prepare_qt_env
 from .status import StatusWindow
 
@@ -13,5 +14,6 @@ __all__ = [
     "OverlayPin",
     "OverlayWindow",
     "StatusWindow",
+    "apply_app_icon",
     "prepare_qt_env",
 ]

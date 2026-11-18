@@ -62,6 +62,24 @@ def prepare_qt_env() -> None:
                 )
 
 
+def apply_app_icon(app: object) -> None:
+    """Set the process / default window icon from ``static/ARLO.png``."""
+    from PySide6.QtGui import QIcon
+    from PySide6.QtWidgets import QApplication
+
+    from arc_helper.config import app_icon_path
+
+    if not isinstance(app, QApplication):
+        return
+    path = app_icon_path()
+    if path is None:
+        return
+    icon = QIcon(str(path))
+    if icon.isNull():
+        return
+    app.setWindowIcon(icon)
+
+
 def apply_overlay_flags(window: QWidget, *, click_through: bool = True) -> None:
     """Frameless, always-on-top, bypass WM (override-redirect on X11)."""
     from PySide6.QtCore import Qt

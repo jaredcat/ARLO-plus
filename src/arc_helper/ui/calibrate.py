@@ -43,6 +43,7 @@ from arc_helper.database import get_database
 from arc_helper.ocr import get_cursor_position
 from arc_helper.ocr import get_ocr_engine
 from arc_helper.ocr import grab_screen
+from arc_helper.ui import apply_app_icon
 from arc_helper.ui import prepare_qt_env
 from arc_helper.ui.platform import apply_overlay_flags
 
@@ -467,6 +468,7 @@ class CalibrationTool(QWidget):
 def main() -> None:
     prepare_qt_env()
     app = QApplication.instance() or QApplication(sys.argv)
+    apply_app_icon(app)
     tool = CalibrationTool()
     tool.show()
     sys.exit(app.exec())
