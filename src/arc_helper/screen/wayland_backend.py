@@ -9,7 +9,6 @@ videoconvert so a 60–144 Hz game does not burn CPU converting unused frames.
 
 import threading
 import time
-from typing import cast
 
 from PIL import Image
 
@@ -159,8 +158,7 @@ class WaylandBackend:
         if frame is None:
             msg = "First frame vanished unexpectedly"
             raise OSError(msg)
-        # Local copy after None-guard (pyright can lose the tuple narrow here).
-        _data, width, height, _stride = cast("tuple[bytes, int, int, int]", frame)
+        _data, width, height, _stride = frame
         # Single-monitor assumption: XWayland reports the total logical
         # screen width, the stream is one monitor. Fine for the primary-
         # monitor use case; multi-monitor scaling is a known limitation.
