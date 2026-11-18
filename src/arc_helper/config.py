@@ -36,6 +36,11 @@ def get_app_dir() -> Path:
 APP_DIR = get_app_dir()
 DATA_DIR = APP_DIR / "data"
 
+_DESC_TRIGGER_LEFT = "Left edge of trigger region"
+_DESC_TRIGGER_TOP = "Top edge of trigger region"
+_DESC_TRIGGER_WIDTH = "Width of trigger region"
+_DESC_TRIGGER_HEIGHT = "Height of trigger region"
+
 
 def get_screen_resolution() -> tuple[int, int]:
     """Get the primary monitor resolution in physical pixels."""
@@ -131,10 +136,10 @@ class TriggerRegion(RegionMixin, BaseSettings):
         extra="ignore",
     )
 
-    x: int = Field(default=0, description="Left edge of trigger region")
-    y: int = Field(default=0, description="Top edge of trigger region")
-    width: int = Field(default=1, description="Width of trigger region")
-    height: int = Field(default=1, description="Height of trigger region")
+    x: int = Field(default=0, description=_DESC_TRIGGER_LEFT)
+    y: int = Field(default=0, description=_DESC_TRIGGER_TOP)
+    width: int = Field(default=1, description=_DESC_TRIGGER_WIDTH)
+    height: int = Field(default=1, description=_DESC_TRIGGER_HEIGHT)
 
 
 class TriggerRegion2(RegionMixin, BaseSettings):
@@ -147,10 +152,10 @@ class TriggerRegion2(RegionMixin, BaseSettings):
         extra="ignore",
     )
 
-    x: int = Field(default=0, description="Left edge of trigger region")
-    y: int = Field(default=0, description="Top edge of trigger region")
-    width: int = Field(default=1, description="Width of trigger region")
-    height: int = Field(default=1, description="Height of trigger region")
+    x: int = Field(default=0, description=_DESC_TRIGGER_LEFT)
+    y: int = Field(default=0, description=_DESC_TRIGGER_TOP)
+    width: int = Field(default=1, description=_DESC_TRIGGER_WIDTH)
+    height: int = Field(default=1, description=_DESC_TRIGGER_HEIGHT)
 
 
 class TooltipRegion(RegionMixin, BaseSettings):
@@ -163,10 +168,10 @@ class TooltipRegion(RegionMixin, BaseSettings):
         extra="ignore",
     )
 
-    x: int = Field(default=0, description="Left edge of trigger region")
-    y: int = Field(default=0, description="Top edge of trigger region")
-    width: int = Field(default=1, description="Width of trigger region")
-    height: int = Field(default=1, description="Height of trigger region")
+    x: int = Field(default=0, description=_DESC_TRIGGER_LEFT)
+    y: int = Field(default=0, description=_DESC_TRIGGER_TOP)
+    width: int = Field(default=1, description=_DESC_TRIGGER_WIDTH)
+    height: int = Field(default=1, description=_DESC_TRIGGER_HEIGHT)
 
 
 class TooltipCaptureSettings(BaseSettings):
@@ -248,6 +253,13 @@ class ScanSettings(BaseSettings):
     trigger_scan_interval: float = Field(
         default=0.5, description="Seconds between trigger scans"
     )
+    idle_scan_interval: float = Field(
+        default=1.0,
+        description=(
+            "Seconds between inventory/map probes while not in inventory "
+            "(gameplay); longer = less capture wakeups"
+        ),
+    )
     tooltip_scan_interval: float = Field(
         default=0.3, description="Seconds between tooltip scans"
     )
@@ -283,6 +295,13 @@ class Settings(BaseSettings):
     # Screen capture backend: auto | x11 | wayland (Linux only)
     screen_backend: str = Field(
         default="auto", description="Screen backend: auto, x11 or wayland"
+    )
+
+    # Hide keep_for / catalog need for projects whose Type is PAUSED (e.g. Expedition).
+    # When false, paused projects still appear but are sorted last in Projects:.
+    disable_paused_projects: bool = Field(
+        default=True,
+        description="Omit PAUSED project types from keep recommendations",
     )
 
     # Hold-to-scan hotkey, evdev key name (Wayland/Linux only)
@@ -342,6 +361,7 @@ class Settings(BaseSettings):
             "",
             "# Scan intervals",
             f"TRIGGER_SCAN_INTERVAL={self.scan.trigger_scan_interval}",
+            f"IDLE_SCAN_INTERVAL={self.scan.idle_scan_interval}",
             f"TOOLTIP_SCAN_INTERVAL={self.scan.tooltip_scan_interval}",
             "",
             "# Debug settings",
@@ -351,6 +371,7 @@ class Settings(BaseSettings):
             "# Platform settings",
             f"SCREEN_BACKEND={self.screen_backend}",
             f"HOTKEY_KEY={self.hotkey_key}",
+            f"DISABLE_PAUSED_PROJECTS={str(self.disable_paused_projects).lower()}",
             "",
             "# Companion map",
             f"MAP_HOTKEY={self.map_hotkey}",

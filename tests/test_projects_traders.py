@@ -146,13 +146,15 @@ def test_write_and_query_projects(tmp_path: Path):
         "Wasp Driver",
         project_items={"trophy display": {"wasp-driver": "IN_PROGRESS"}},
     )
-    assert len(rem) == 1 and rem[0].quantity == 20
+    assert len(rem) == 1
+    assert rem[0].quantity == 20
     # Later-stage item with no mappedProgress row yet — still remaining
     rem = catalog.remaining_for_item(
         "Wasp Driver",
         project_items={"trophy display": {"tick-pod": "COMPLETED"}},
     )
-    assert len(rem) == 1 and rem[0].quantity == 20
+    assert len(rem) == 1
+    assert rem[0].quantity == 20
 
 
 def test_write_and_query_traders(tmp_path: Path):
@@ -320,6 +322,74 @@ def test_format_keep_for_drops_inactive_wiki_projects():
         )
         == "Projects: Expedition 1 (5x)"
     )
+
+
+def test_project_is_active_respects_paused_type(monkeypatch):
+    paused = {"name": "Expedition", "project_type": "PAUSED", "ends_on": ""}
+    live = {"name": "Trophy Display", "project_type": "", "ends_on": ""}
+    monkeypatch.setenv("DISABLE_PAUSED_PROJECTS", "true")
+    assert not project_is_active(paused)
+    assert project_is_active(live)
+    monkeypatch.setenv("DISABLE_PAUSED_PROJECTS", "false")
+    assert project_is_active(paused)
+
+
+def test_apply_progress_paused_projects_last_or_omitted(tmp_path, monkeypatch):
+    from arc_helper.config import reload_settings
+
+    projects = [
+        {
+            "id": "expedition",
+            "name": "Expedition",
+            "project_type": "PAUSED",
+            "starts_on": "",
+            "ends_on": "",
+            "required_items": [
+                {
+                    "item_id": "arc-alloy",
+                    "quantity": 5,
+                    "item": {"id": "arc-alloy", "name": "ARC Alloy"},
+                }
+            ],
+        },
+        {
+            "id": "trophy-display",
+            "name": "Trophy Display",
+            "project_type": "",
+            "starts_on": "",
+            "ends_on": "",
+            "required_items": [
+                {
+                    "item_id": "arc-alloy",
+                    "quantity": 10,
+                    "item": {"id": "arc-alloy", "name": "ARC Alloy"},
+                }
+            ],
+        },
+    ]
+    write_projects_catalog(
+        projects,
+        csv_path=tmp_path / "projects.csv",
+        db_path=tmp_path / "projects.db",
+        today=date(2026, 11, 16),
+    )
+    catalog = ProjectCatalog(tmp_path / "projects.db")
+    item = Item(
+        name="ARC Alloy",
+        action="Keep",
+        keep_for="Projects: Expedition (5x), Trophy Display (10x)",
+    )
+
+    monkeypatch.setenv("DISABLE_PAUSED_PROJECTS", "false")
+    reload_settings()
+    shown = apply_progress(item, None, project_catalog=catalog)
+    assert shown.keep_for == "Projects: Trophy Display (10x), Expedition (5x)"
+
+    monkeypatch.setenv("DISABLE_PAUSED_PROJECTS", "true")
+    reload_settings()
+    hidden = apply_progress(item, None, project_catalog=catalog)
+    assert "Expedition" not in (hidden.keep_for or "")
+    assert "Trophy Display" in (hidden.keep_for or "")
 
 
 def test_format_keep_for_prefers_staged_project_labels():

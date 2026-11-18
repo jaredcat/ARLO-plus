@@ -310,7 +310,7 @@ Bucket (Backpack Attachment),Sell,,,,
 Bucket (Scrappy Outfit),Sell,,,,
 Buff Rock (Scrappy Appearance),Sell,,,,
 Buh-bye! (Emote),Sell,,,,
-Bully Fragmenter,Keep until uses complete; recycle after,,"Workshop: Research Station 3 (6x); Quests: Bait Fetch Blast (1x); Research: Anvil Blueprint (5x); Quests: Bait, Fetch, Blast (1x)",5000,3
+Bully Fragmenter,Keep until uses complete; recycle after,"1x ARC Alloy, 1x Explosive Compound","Workshop: Research Station 3 (6x); Quests: Bait Fetch Blast (1x); Research: Anvil Blueprint (5x); Quests: Bait, Fetch, Blast (1x)",5000,3
 Bulwark Stencil,Sell,,,5000,1
 Buoy (Backpack Charm),Sell,,,,
 Bureau Ceiling Lamp,Sell,,,,
@@ -1368,7 +1368,7 @@ Tempest I,Keep,"2x Advanced Mechanical Components, 2x Medium Gun Parts",Equippab
 Tempest II,Keep,"3x Advanced Mechanical Components, 3x Medium Gun Parts",Equippable Weapon,17000,1
 Tempest III,Keep,"4x Advanced Mechanical Components, 4x Medium Gun Parts",Equippable Weapon,22000,1
 Tempest IV,Keep,"5x Advanced Mechanical Components, 4x Medium Gun Parts",Equippable Weapon,27000,1
-Tether Launcher,Use,"1x Cable Stripper, 1x Rope",Quick Use consumable,3000,1
+Tether Launcher,Use,"1x Mechanical Components, 1x Rope",Quick Use consumable,3000,1
 Tether Launcher Blueprint,Keep,,"Learn, sell, or trade to other players",5000,1
 Thank you (Emote),Sell,,,,
 Thermal Shaker,Keep until uses complete; recycle after,"2x Calculator, 2x Electrical Components",Workshop: Research Station 4 (3x),3000,3

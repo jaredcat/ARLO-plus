@@ -41,6 +41,8 @@ from arc_helper.hotkey import TapHotkeyMonitor
 from arc_helper.hotkey import get_hotkey_monitor
 from arc_helper.hotkey import get_map_find_tap_monitor
 from arc_helper.hotkey import get_map_tap_monitor
+from arc_helper.map_data import MapMarker
+from arc_helper.map_data import MapMeta
 from arc_helper.map_data import get_map_catalog
 from arc_helper.map_filter import MapFilterState
 from arc_helper.map_filter import resolve_markers
@@ -173,6 +175,8 @@ class Scanner:
     _wayland_stable: bool = False
     _trigger_miss_streak: int = 0
     _TRIGGER_MISS_LIMIT: ClassVar[int] = 2
+    # True after we posted map_mode True until a closed probe succeeds.
+    _map_idle_active: bool = False
 
     # Hotkey override (Ctrl+Shift to force tooltip scanning)
     _hotkey_override: bool = False
@@ -221,110 +225,122 @@ class Scanner:
         """Resume scanning."""
         self.state = ScannerState.IDLE
 
+    def _idle_phase(
+        self, *, hotkey_now: bool, ocr: OCREngine, settings: Settings
+    ) -> bool:
+        """Handle IDLE phase; return True to ``continue`` the outer loop."""
+        idle_interval = settings.scan.idle_scan_interval
+        if MapSyncEngine.detect_map_open():
+            self._map_idle_active = True
+            self._set_capture_live(enabled=True)
+            self._update_status("map")
+            self.ui_queue.put(("map_mode", True))
+            time.sleep(idle_interval)
+            self.stats.trigger_scans += 1
+            return True
+
+        if self._map_idle_active:
+            self._map_idle_active = False
+            logger.info("MAP closed - hiding in-game pins")
+        self.ui_queue.put(("map_mode", False))
+        self._update_status("scanning")
+
+        if hotkey_now:
+            self._hotkey_override = True
+            self._in_raid = False
+            self.state = ScannerState.ACTIVE
+            self._trigger_miss_streak = 0
+            self._set_capture_live(enabled=True)
+            self._update_status("hotkey")
+            logger.info("Hotkey override - activating tooltip scanner")
+        else:
+            trigger_idx = ocr.check_trigger_which(
+                [settings.trigger_region, settings.trigger_region2]
+            )
+            if trigger_idx is not None:
+                self._hotkey_override = False
+                self._in_raid = trigger_idx == 1  # region2 = in-raid
+                self.state = ScannerState.ACTIVE
+                self._trigger_miss_streak = 0
+                self._set_capture_live(enabled=True)
+                self._update_status("active")
+                context = "in-raid" if self._in_raid else "menu"
+                logger.info(
+                    "INVENTORY detected (%s) - activating tooltip scanner", context
+                )
+            else:
+                self._set_capture_live(enabled=False)
+                time.sleep(idle_interval)
+        self.stats.trigger_scans += 1
+        return False
+
+    def _active_check_exit(
+        self, *, hotkey_now: bool, ocr: OCREngine, settings: Settings
+    ) -> bool:
+        """Check whether to leave ACTIVE mode; return True to ``continue``."""
+        if self._hotkey_override:
+            if not hotkey_now:
+                self._hotkey_override = False
+                self._enter_idle("Hotkey released - returning to idle")
+                return True
+        else:
+            # Inventory every tick so Wayland cannot linger on a stale INVENTORY
+            # frame; map chrome is cheaper to sample less often.
+            self._trigger_check_counter += 1
+            if self._trigger_check_counter % 3 == 0 and MapSyncEngine.detect_map_open():
+                self._map_idle_active = True
+                self._enter_idle("MAP screen open - leaving inventory scan")
+                self.ui_queue.put(("map_mode", True))
+                return True
+            if self._inventory_closed(ocr, settings):
+                self._enter_idle("INVENTORY closed - returning to idle")
+                return True
+        return False
+
+    def _active_scan_step(self, ocr: OCREngine, settings: Settings) -> None:
+        """Perform one tooltip scan in ACTIVE state and sleep the scan interval."""
+        item_name = ocr.extract_item_name_at_cursor()
+        self.stats.tooltip_scans += 1
+        if item_name:
+            self._handle_detected_item(item_name)
+        else:
+            self._handle_empty_tooltip()
+        time.sleep(settings.scan.tooltip_scan_interval)
+
+    def _scan_tick(self, ocr: OCREngine, settings: Settings) -> bool:
+        """One scanner iteration. Return False to stop the loop."""
+        if self.state == ScannerState.PAUSED:
+            time.sleep(0.1)
+            return True
+        if self.state == ScannerState.STOPPED:
+            return False
+        hotkey_now = self.hotkey.is_held()
+        if self.state == ScannerState.IDLE:
+            self._idle_phase(hotkey_now=hotkey_now, ocr=ocr, settings=settings)
+            return True
+        if self.state == ScannerState.ACTIVE and not self._active_check_exit(
+            hotkey_now=hotkey_now, ocr=ocr, settings=settings
+        ):
+            self._active_scan_step(ocr, settings)
+        return True
+
     def _scan_loop(self) -> None:
         """Main scanning loop running in background thread."""
         settings = get_settings()
         ocr = get_ocr_engine()
 
-        while self._running:  # ruff: ignore[too-many-nested-blocks]
+        while self._running:
             try:
-                if self.state == ScannerState.PAUSED:
-                    time.sleep(0.1)
-                    continue
-
-                if self.state == ScannerState.STOPPED:
+                if not self._scan_tick(ocr, settings):
                     break
-
-                # Check hotkey override (Ctrl+Shift)
-                hotkey_now = self.hotkey.is_held()
-
-                # Phase 1: Check for trigger (INVENTORY) or hotkey
-                if self.state == ScannerState.IDLE:
-                    # MAP screen still shows the INVENTORY tab label in the top
-                    # nav — suppress inventory scan when map chrome is visible.
-                    if MapSyncEngine.detect_map_open():
-                        self._update_status("map")
-                        self.ui_queue.put(("map_mode", True))
-                        time.sleep(settings.scan.trigger_scan_interval)
-                        self.stats.trigger_scans += 1
-                        continue
-
-                    self.ui_queue.put(("map_mode", False))
-                    self._update_status("scanning")
-
-                    if hotkey_now:
-                        # Hotkey pressed - enter active mode via override
-                        self._hotkey_override = True
-                        self._in_raid = False
-                        self.state = ScannerState.ACTIVE
-                        self._trigger_miss_streak = 0
-                        self._update_status("hotkey")
-                        logger.info("Hotkey override - activating tooltip scanner")
-                    else:
-                        trigger_idx = ocr.check_trigger_which(
-                            [settings.trigger_region, settings.trigger_region2]
-                        )
-                        if trigger_idx is not None:
-                            # Trigger detected! Switch to active mode
-                            self._hotkey_override = False
-                            self._in_raid = trigger_idx == 1  # region2 = in-raid
-                            self.state = ScannerState.ACTIVE
-                            self._trigger_miss_streak = 0
-                            self._update_status("active")
-                            context = "in-raid" if self._in_raid else "menu"
-                            logger.info(
-                                "INVENTORY detected (%s) - activating tooltip scanner",
-                                context,
-                            )
-                        else:
-                            # Wait before next trigger scan
-                            time.sleep(settings.scan.trigger_scan_interval)
-
-                    self.stats.trigger_scans += 1
-
-                # Phase 2: Active mode - scan tooltip
-                elif self.state == ScannerState.ACTIVE:
-                    if self._hotkey_override:
-                        # Hotkey mode: stay active as long as hotkey is held
-                        if not hotkey_now:
-                            self._hotkey_override = False
-                            self._enter_idle("Hotkey released - returning to idle")
-                            continue
-                    else:
-                        # Inventory mode: leave if MAP opens or INVENTORY closes
-                        self._trigger_check_counter += 1
-                        should_check_trigger = self._trigger_check_counter % 3 == 0
-
-                        if should_check_trigger:
-                            if MapSyncEngine.detect_map_open():
-                                self._enter_idle(
-                                    "MAP screen open - leaving inventory scan"
-                                )
-                                self.ui_queue.put(("map_mode", True))
-                                continue
-                            if self._inventory_closed(ocr, settings):
-                                self._enter_idle("INVENTORY closed - returning to idle")
-                                continue
-
-                    # Scan tooltip at cursor position
-                    item_name = ocr.extract_item_name_at_cursor()
-                    self.stats.tooltip_scans += 1
-
-                    if item_name:
-                        self._handle_detected_item(item_name)
-                    else:
-                        # Wayland: one empty frame is normal. A gap as long as
-                        # OVERLAY_DISPLAY_TIME means the tooltip is gone.
-                        self._handle_empty_tooltip()
-
-                    # Wait before next tooltip scan
-                    time.sleep(settings.scan.tooltip_scan_interval)
-
             except ScreenCaptureUnavailable as e:
-                logger.error(f"Screen capture lost permanently: {e}")
+                # Backend latched a fatal capture error. Keep the loop alive so a
+                # later portal reconnect (or manual share re-approve) can recover
+                # once grab() succeeds again.
+                logger.error(f"Screen capture unavailable: {e}")
                 self._update_status("error")
-                self.state = ScannerState.STOPPED
-                break  # latch: no point scanning without capture
+                self.state = ScannerState.IDLE
+                time.sleep(2.0)
             except Exception as e:  # ruff: ignore[blind-except]
                 logger.error(f"Scanner error: {e}")
                 self._update_status("error")
@@ -336,10 +352,21 @@ class Scanner:
         self._in_raid = False
         self._trigger_miss_streak = 0
         self._last_shown_item = ""
+        # Keep live capture if we are handing off to map mode (caller sets flag).
+        if not self._map_idle_active:
+            self._set_capture_live(enabled=False)
         if self._wayland_stable:
             self.ui_queue.put(("overlay_hide",))
         self._update_status("scanning")
         logger.info(reason)
+
+    def _set_capture_live(self, *, enabled: bool) -> None:
+        """Keep Wayland ScreenCast hot for inventory/map; pause during gameplay."""
+        if not self._wayland_stable:
+            return
+        from arc_helper.screen import set_live_capture
+
+        set_live_capture(enabled=enabled)
 
     def _inventory_closed(self, ocr: OCREngine, settings: Settings) -> bool:
         """True if the INVENTORY trigger is gone.
@@ -775,6 +802,26 @@ class Application:
 
         Thread(target=_worker, daemon=True, name="map-pins").start()
 
+    @staticmethod
+    def _project_candidates_to_pins(
+        candidates: list[MapMarker],
+        reg: ViewportRegistration,
+        meta: MapMeta,
+        cap: int,
+    ) -> list[OverlayPin]:
+        """Project map markers to on-screen overlay pin coords."""
+        left, top, _r, _b = reg.viewport_bbox
+        pins: list[OverlayPin] = []
+        for m in candidates:
+            screen = latlng_to_screen(m.lat, m.lng, meta=meta, reg=reg)
+            if screen is None:
+                continue
+            sx, sy = screen
+            pins.append(OverlayPin(x=sx - left, y=sy - top, category=m.category))
+            if len(pins) >= cap:
+                break
+        return pins
+
     def _build_pin_frame(
         self,
         reg: ViewportRegistration | None,
@@ -816,23 +863,7 @@ class Application:
             meta=meta,
         )
 
-        left, top, _r, _b = reg.viewport_bbox
-        pins: list[OverlayPin] = []
-        for m in candidates:
-            screen = latlng_to_screen(m.lat, m.lng, meta=meta, reg=reg)
-            if screen is None:
-                continue
-            sx, sy = screen
-            pins.append(
-                OverlayPin(
-                    x=sx - left,
-                    y=sy - top,
-                    category=m.category,
-                )
-            )
-            if len(pins) >= INGAME_PIN_CAP:
-                break
-
+        pins = self._project_candidates_to_pins(candidates, reg, meta, INGAME_PIN_CAP)
         logger.info(
             "Map pins: %s on-screen / %s candidates (origin=%s)",
             len(pins),
@@ -845,13 +876,29 @@ class Application:
             "marker_count": len(pins),
         }
 
-    def _pump_ui_queue(self) -> None:
-        """Drain scanner UI messages on the main thread (QTimer)."""
-        if self._sigint_requested:
-            self.quit()
-            return
+    def _dispatch_ui_msg(self, msg: tuple) -> None:
+        """Apply one UI queue message on the main thread."""
+        kind = msg[0]
+        if kind == "status":
+            self._apply_status(msg[1])
+        elif kind == "overlay":
+            self._last_overlay_item = msg[1]
+            self.overlay.show_item(msg[1], msg[2], in_raid=msg[3])
+        elif kind == "overlay_keep":
+            self.overlay.keep_alive()
+        elif kind == "overlay_hide":
+            self.overlay.hide()
+        elif kind == "progress_imported":
+            self._apply_progress_profile(msg[1])
+        elif kind == "map_pins_frame":
+            self._apply_map_pins_frame(msg[1])
+        elif kind == "map_thumb":
+            self._on_map_thumb(msg[1])
+        elif kind == "map_mode":
+            self._on_map_mode(active=bool(msg[1]))
 
-        # Global map hotkeys (work while the game has focus on Wayland/Windows)
+    def _poll_map_hotkeys(self) -> None:
+        """Check global map hotkeys (works while game has focus)."""
         try:
             if self.map_tap.consume_press():
                 self._toggle_map_window()
@@ -863,26 +910,17 @@ class Application:
         except Exception as e:  # ruff: ignore[blind-except]
             logger.warning("Map-find hotkey poll failed: %s", e)
 
+    def _pump_ui_queue(self) -> None:
+        """Drain scanner UI messages on the main thread (QTimer)."""
+        if self._sigint_requested:
+            self.quit()
+            return
+
+        self._poll_map_hotkeys()
+
         try:
             while True:
-                msg = self.ui_queue.get_nowait()
-                if msg[0] == "status":
-                    self._apply_status(msg[1])
-                elif msg[0] == "overlay":
-                    self._last_overlay_item = msg[1]
-                    self.overlay.show_item(msg[1], msg[2], in_raid=msg[3])
-                elif msg[0] == "overlay_keep":
-                    self.overlay.keep_alive()
-                elif msg[0] == "overlay_hide":
-                    self.overlay.hide()
-                elif msg[0] == "progress_imported":
-                    self._apply_progress_profile(msg[1])
-                elif msg[0] == "map_pins_frame":
-                    self._apply_map_pins_frame(msg[1])
-                elif msg[0] == "map_thumb":
-                    self._on_map_thumb(msg[1])
-                elif msg[0] == "map_mode":
-                    self._on_map_mode(active=bool(msg[1]))
+                self._dispatch_ui_msg(self.ui_queue.get_nowait())
         except queue.Empty:
             pass
 
@@ -971,9 +1009,7 @@ class Application:
             f"  Size: {self.settings.trigger_region2.width}x{self.settings.trigger_region2.height}"
         )
         logger.info("=" * 50)
-        logger.info(
-            f"Trigger scan interval: {self.settings.scan.trigger_scan_interval}s"
-        )
+        logger.info(f"Idle scan interval: {self.settings.scan.idle_scan_interval}s")
         logger.info(
             f"Tooltip scan interval: {self.settings.scan.tooltip_scan_interval}s"
         )

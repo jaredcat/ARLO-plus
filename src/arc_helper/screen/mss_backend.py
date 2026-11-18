@@ -16,10 +16,16 @@ class MssBackend:
         self.name = name
 
     def start(self) -> None:
-        pass
+        # mss opens a fresh connection per grab — nothing to start.
+        _ = self
 
     def stop(self) -> None:
-        pass
+        # mss opens a fresh connection per grab — nothing to stop.
+        _ = self
+
+    def set_live_capture(self, *, enabled: bool) -> None:
+        # On-demand mss captures; no persistent stream to pause.
+        _ = self, enabled
 
     @property
     def tk_scale(self) -> float:

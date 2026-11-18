@@ -107,9 +107,22 @@ apollo,Apollo,trigger-nade,Trigger 'Nade,3k
 apollo,Apollo,smoke-grenade,Smoke Grenade,3k
 apollo,Apollo,blaze-grenade,Blaze Grenade,4.8k
 apollo,Apollo,surge-coil,Surge Coil,6.3k
+nomadic-envoys,Nomadic Envoys,gas-mask,Gas Mask,75k
+nomadic-envoys,Nomadic Envoys,angry,Angry,75k
+nomadic-envoys,Nomadic Envoys,dead-flowers,Dead Flowers,5k
+nomadic-envoys,Nomadic Envoys,harmonica,Harmonica,9k
+nomadic-envoys,Nomadic Envoys,yank-grenade,Yank Grenade,9k
+nomadic-envoys,Nomadic Envoys,anvil-ii,Anvil II,20k
+nomadic-envoys,Nomadic Envoys,fancy-plate,Fancy Plate,15k
+nomadic-envoys,Nomadic Envoys,mask-fragment,Mask Fragment,15k
+nomadic-envoys,Nomadic Envoys,photoelectric-cloak,Photoelectric Cloak,30k
+nomadic-envoys,Nomadic Envoys,wolfpack,Wolfpack,30k
+nomadic-envoys,Nomadic Envoys,hullcracker-ii,Hullcracker II,30k
+nomadic-envoys,Nomadic Envoys,25-raider-tokens,×25 Raider Tokens,150k
 nomadic-envoys,Nomadic Envoys,assessor-matrix,Assessor Matrix,
 nomadic-envoys,Nomadic Envoys,bastion-cell,Bastion Cell,
 nomadic-envoys,Nomadic Envoys,bombardier-cell,Bombardier Cell,
+nomadic-envoys,Nomadic Envoys,bully-fragmenter,Bully Fragmenter,
 nomadic-envoys,Nomadic Envoys,leaper-pulse-unit,Leaper Pulse Unit,
 nomadic-envoys,Nomadic Envoys,rocketeer-driver,Rocketeer Driver,
 nomadic-envoys,Nomadic Envoys,turbine-compressor,Turbine Compressor,
@@ -118,6 +131,7 @@ nomadic-envoys,Nomadic Envoys,matriarch-reactor,Matriarch Reactor,
 nomadic-envoys,Nomadic Envoys,queen-reactor,Queen Reactor,
 nomadic-envoys,Nomadic Envoys,fireball-burner,Fireball Burner,
 nomadic-envoys,Nomadic Envoys,pop-trigger,Pop Trigger,
+nomadic-envoys,Nomadic Envoys,skulker-targeter,Skulker Targeter,
 nomadic-envoys,Nomadic Envoys,snitch-scanner,Snitch Scanner,
 nomadic-envoys,Nomadic Envoys,spotter-relay,Spotter Relay,
 nomadic-envoys,Nomadic Envoys,tick-pod,Tick Pod,
@@ -131,7 +145,6 @@ nomadic-envoys,Nomadic Envoys,arc-powercell,ARC Powercell,
 nomadic-envoys,Nomadic Envoys,arc-alloy,ARC Alloy,
 nomadic-envoys,Nomadic Envoys,burned-arc-circuitry,Burned ARC Circuitry,
 nomadic-envoys,Nomadic Envoys,impure-arc-coolant,Impure ARC Coolant,
-nomadic-envoys,Nomadic Envoys,skulker-targeter,Skulker Targeter,
 nomadic-envoys,Nomadic Envoys,advanced-arc-powercell,Advanced ARC Powercell,
 nomadic-envoys,Nomadic Envoys,arc-circuitry,ARC Circuitry,
 nomadic-envoys,Nomadic Envoys,arc-coolant,ARC Coolant,
@@ -144,15 +157,4 @@ nomadic-envoys,Nomadic Envoys,arc-conductive-coupler,ARC Conductive Coupler,
 nomadic-envoys,Nomadic Envoys,arc-data-module,ARC Data Module,
 nomadic-envoys,Nomadic Envoys,arc-insulated-coupler,ARC Insulated Coupler,
 nomadic-envoys,Nomadic Envoys,arc-plated-coupler,ARC Plated Coupler,
-nomadic-envoys,Nomadic Envoys,bully-fragmenter,Bully Fragmenter,
 nomadic-envoys,Nomadic Envoys,bronze-statuette,Bronze Statuette,
-nomadic-envoys,Nomadic Envoys,eye-band,Eye Band,100k
-nomadic-envoys,Nomadic Envoys,bobblehead,Bobblehead,50k
-nomadic-envoys,Nomadic Envoys,50-assorted-seeds,×50 Assorted Seeds,10k
-nomadic-envoys,Nomadic Envoys,yank-grenade,Yank Grenade,9k
-nomadic-envoys,Nomadic Envoys,grappling-hook,Grappling Hook,9k
-nomadic-envoys,Nomadic Envoys,anvil-ii,Anvil II,20k
-nomadic-envoys,Nomadic Envoys,hullcracker-ii,Hullcracker II,30k
-nomadic-envoys,Nomadic Envoys,deadline,Deadline,20k
-nomadic-envoys,Nomadic Envoys,kinetic-converter,Kinetic Converter,50k
-nomadic-envoys,Nomadic Envoys,25-raider-tokens,×25 Raider Tokens,150k

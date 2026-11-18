@@ -44,8 +44,15 @@ OVERLAY_COOLDOWN=2.0             # Minimum time between showing same item (secon
 # SCANNING SETTINGS - How often the app scans the screen
 # =============================================================================
 
-TRIGGER_SCAN_INTERVAL=0.5        # Seconds between trigger scans
+TRIGGER_SCAN_INTERVAL=0.5        # Seconds between trigger scans (legacy; idle uses IDLE_SCAN_INTERVAL)
+IDLE_SCAN_INTERVAL=1.0           # Seconds between inventory/map probes while idle (gameplay)
 TOOLTIP_SCAN_INTERVAL=0.3        # Seconds between tooltip scans
+
+# =============================================================================
+# PROJECTS
+# =============================================================================
+
+DISABLE_PAUSED_PROJECTS=true     # Omit PAUSED catalog projects (e.g. Expedition); false = show last
 
 # =============================================================================
 # COMPANION MAP

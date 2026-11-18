@@ -1,6 +1,9 @@
 """Tests for MetaForge account-sync import and keep_for progress filtering."""
 
 import json
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from pathlib import Path
 
 from arc_helper.database import Item
@@ -315,14 +318,15 @@ def test_future_project_stage_item_not_cleared_when_earlier_stages_done(
     from arc_helper.projects import ProjectCatalog
     from update_db import write_projects_catalog
 
+    today = datetime.now(UTC).date()
     write_projects_catalog(
         [
             {
                 "id": "souls-offering",
                 "name": "Soul's Offering",
                 "project_type": "Temporary",
-                "starts_on": "2026-10-27",
-                "ends_on": "2026-11-16",
+                "starts_on": (today - timedelta(days=7)).isoformat(),
+                "ends_on": (today + timedelta(days=30)).isoformat(),
                 "required_items": [
                     {
                         "item_id": "mask-fragment",
@@ -341,6 +345,7 @@ def test_future_project_stage_item_not_cleared_when_earlier_stages_done(
         ],
         csv_path=tmp_path / "projects.csv",
         db_path=tmp_path / "projects.db",
+        today=today,
     )
     profile = ProgressProfile(
         project_items={
