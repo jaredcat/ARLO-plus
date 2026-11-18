@@ -33,6 +33,8 @@ Concrete endpoints / pages:
 
 If MetaForge is unreachable, the updater falls back to the wiki for items. If both are down, the app starts with whatever databases it already has.
 
+Hybrid updates **abort** (no CSV/DB write, no 24h stamp) when the wiki Loot uses scrape fails or returns empty — continuing would overwrite rich `keep_for` notes with material fallbacks. Retry on the next launch or manual run once the wiki is healthy.
+
 The throttle timestamp is stored in `.last_wiki_update` in the app directory. Delete this file to force an update on the next launch.
 
 ### Manual Update from Command Line

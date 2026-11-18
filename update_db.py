@@ -121,6 +121,15 @@ _MIN_LOOT_ROW_CELLS = 4
 
 
 # =============================================================================
+# Errors
+# =============================================================================
+
+
+class WikiUnavailableError(RuntimeError):
+    """Wiki fetch failed; abort the update so we do not wipe keep_for with fallbacks."""
+
+
+# =============================================================================
 # Data classes
 # =============================================================================
 
@@ -2434,12 +2443,21 @@ def fetch_items_hybrid(*, persist_side_catalogs: bool = True) -> list[GameItem]:
     recycle_map = fetch_metaforge_recycle_map(raw_items)
     quest_map = fetch_metaforge_quest_items(persist=persist_side_catalogs)
 
-    # 2. Wiki: keep_for (workshop from station pages + loot quests/projects) + catalogs
+    # 2. Wiki: keep_for (workshop from station pages + loot quests/projects) + catalogs.
+    # Abort on failure: empty wiki uses + material fallbacks would overwrite good
+    # keep_for notes via merge (worse than skipping the update).
     try:
         wiki_uses = scrape_wiki_uses()
+    except WikiUnavailableError:
+        raise
     except Exception as e:
-        print(f"  Wiki scrape failed ({e}), continuing without wiki uses")
-        wiki_uses = {}
+        raise WikiUnavailableError(
+            f"Wiki uses scrape failed ({e}); aborting to avoid wiping keep_for"
+        ) from e
+    if not wiki_uses:
+        raise WikiUnavailableError(
+            "Wiki Loot returned no uses; aborting to avoid wiping keep_for"
+        )
 
     project_map: dict[str, list[str]] = {}
     inactive_projects: set[str] = set()
@@ -3328,6 +3346,9 @@ def _fetch_items_for_cli(
             fetch_items_hybrid(persist_side_catalogs=persist_side),
             "MetaForge API + Wiki",
         )
+    except WikiUnavailableError:
+        # Wiki is required for hybrid keep_for; do not fall back to a worse catalog.
+        raise
     except Exception as e:
         print(f"\nHybrid fetch failed ({e}), falling back to wiki only...")
         items = fetch_items_from_wiki()
@@ -3370,7 +3391,13 @@ def main() -> None:
         return
 
     persist_side = not args.dry_run
-    items, source_name = _fetch_items_for_cli(args.source, persist_side=persist_side)
+    try:
+        items, source_name = _fetch_items_for_cli(
+            args.source, persist_side=persist_side
+        )
+    except WikiUnavailableError as e:
+        print(f"\nUpdate aborted: {e}")
+        sys.exit(1)
     if not items:
         print("No items found. Aborting.")
         sys.exit(1)
@@ -3476,7 +3503,8 @@ def auto_update(*, force: bool = False) -> bool:
     """
     Run a database update if due. Called by the main app on startup.
     Uses hybrid mode (MetaForge + Wiki) with merge, throttled to 24h.
-    Falls through gracefully on any error.
+    Falls through gracefully on any error. Does not mark the throttle stamp
+    when the wiki is down, so the next launch can retry.
     """
     if not force and not _should_auto_update():
         return False
@@ -3485,6 +3513,9 @@ def auto_update(*, force: bool = False) -> bool:
         print("Checking for item database updates...")
         try:
             items = fetch_items_hybrid()
+        except WikiUnavailableError as e:
+            print(f"  Update aborted ({e})")
+            return False
         except Exception:
             print("  Hybrid fetch failed, trying wiki only...")
             try:
