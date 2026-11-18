@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Versions
 
+### [1.0.4]
+
+- Abort database updates if any of the sources are down
+- Show update status in ARLO's status pill
+
 ### [1.0.3]
 
 - Add icon

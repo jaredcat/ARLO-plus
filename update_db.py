@@ -42,6 +42,8 @@ import re
 import sqlite3
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
@@ -52,6 +54,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from collections.abc import Sequence
 
 try:
@@ -2429,7 +2432,71 @@ def fetch_items_from_wiki() -> list[GameItem]:
 # =============================================================================
 
 
-def fetch_items_hybrid(*, persist_side_catalogs: bool = True) -> list[GameItem]:
+def _emit_progress(
+    on_progress: Callable[[str], None] | None, message: str
+) -> None:
+    """Notify an optional progress callback (status pill / UI)."""
+    if on_progress is None:
+        return
+    with contextlib.suppress(Exception):
+        on_progress(message)
+
+
+_PREFLIGHT_TIMEOUT_S = 8
+
+
+def _probe_http_ok(url: str, *, timeout: float = _PREFLIGHT_TIMEOUT_S) -> None:
+    """Cheap reachability check: GET must return a non-error status."""
+    resp = requests.get(url, timeout=timeout, headers={"User-Agent": USER_AGENT})
+    resp.raise_for_status()
+
+
+def preflight_hybrid_sources(
+    *, on_progress: Callable[[str], None] | None = None
+) -> None:
+    """Ping MetaForge + wiki before any bulk fetch.
+
+    Hybrid keep_for depends on wiki Loot; abort immediately if it is down so we
+    do not spend a minute paging MetaForge only to fail afterward. MetaForge
+    failure raises a generic error so callers can fall back to wiki-only.
+    """
+    _emit_progress(on_progress, "DB: checking sources…")
+    print("Checking update sources…")
+
+    checks = {
+        "MetaForge": f"{METAFORGE_API_BASE}/items?page=1&limit=1",
+        "Wiki": wiki_url(WIKI_LOOT_PATH),
+    }
+    errors: dict[str, Exception] = {}
+
+    with ThreadPoolExecutor(max_workers=len(checks)) as pool:
+        futures = {
+            pool.submit(_probe_http_ok, url): name for name, url in checks.items()
+        }
+        for fut in as_completed(futures):
+            name = futures[fut]
+            try:
+                fut.result()
+                print(f"  {name}: ok")
+            except Exception as e:
+                errors[name] = e
+                print(f"  {name}: failed ({e})")
+
+    if "Wiki" in errors:
+        raise WikiUnavailableError(
+            f"Wiki unreachable ({errors['Wiki']}); aborting to avoid wiping keep_for"
+        ) from errors["Wiki"]
+    if "MetaForge" in errors:
+        raise RuntimeError(
+            f"MetaForge unreachable ({errors['MetaForge']})"
+        ) from errors["MetaForge"]
+
+
+def fetch_items_hybrid(
+    *,
+    persist_side_catalogs: bool = True,
+    on_progress: Callable[[str], None] | None = None,
+) -> list[GameItem]:
     """Hybrid catalog build — see module docstring / docs/ITEMS.md source-of-truth.
 
     MetaForge: items, prices, stacks, quests, primary recycles.
@@ -2438,14 +2505,20 @@ def fetch_items_hybrid(*, persist_side_catalogs: bool = True) -> list[GameItem]:
     quest enrichment. ``scrape_wiki_uses`` already overlays station-page Workshop
     lines onto Loot Uses.
     """
+    preflight_hybrid_sources(on_progress=on_progress)
+
     # 1. MetaForge: items + recycle (wiki gap-fill inside) + quests
+    _emit_progress(on_progress, "DB: MetaForge items…")
     raw_items = fetch_metaforge_items()
+    _emit_progress(on_progress, "DB: recycle data…")
     recycle_map = fetch_metaforge_recycle_map(raw_items)
+    _emit_progress(on_progress, "DB: quests…")
     quest_map = fetch_metaforge_quest_items(persist=persist_side_catalogs)
 
     # 2. Wiki: keep_for (workshop from station pages + loot quests/projects) + catalogs.
     # Abort on failure: empty wiki uses + material fallbacks would overwrite good
     # keep_for notes via merge (worse than skipping the update).
+    _emit_progress(on_progress, "DB: wiki uses…")
     try:
         wiki_uses = scrape_wiki_uses()
     except WikiUnavailableError:
@@ -2463,6 +2536,7 @@ def fetch_items_hybrid(*, persist_side_catalogs: bool = True) -> list[GameItem]:
     inactive_projects: set[str] = set()
     paused_projects: set[str] = set()
     if persist_side_catalogs:
+        _emit_progress(on_progress, "DB: projects / traders…")
         project_map, inactive_projects, paused_projects = persist_wiki_side_catalogs()
 
     # 3. Combine into GameItems
@@ -3494,39 +3568,56 @@ def _should_auto_update() -> bool:
         return True
 
 
+def is_auto_update_due(*, force: bool = False) -> bool:
+    """True when a startup catalog refresh should run (or ``force``)."""
+    return force or _should_auto_update()
+
+
 def _mark_updated() -> None:
     with contextlib.suppress(OSError):
         LAST_UPDATE_FILE.write_text(str(time.time()), encoding="utf-8")
 
 
-def auto_update(*, force: bool = False) -> bool:
+def auto_update(
+    *,
+    force: bool = False,
+    on_progress: Callable[[str], None] | None = None,
+) -> bool:
     """
     Run a database update if due. Called by the main app on startup.
     Uses hybrid mode (MetaForge + Wiki) with merge, throttled to 24h.
     Falls through gracefully on any error. Does not mark the throttle stamp
     when the wiki is down, so the next launch can retry.
+
+    ``on_progress`` receives short milestone strings suitable for a status pill.
     """
-    if not force and not _should_auto_update():
+    if not is_auto_update_due(force=force):
         return False
 
     try:
         print("Checking for item database updates...")
+        _emit_progress(on_progress, "Updating database…")
         try:
-            items = fetch_items_hybrid()
+            items = fetch_items_hybrid(on_progress=on_progress)
         except WikiUnavailableError as e:
             print(f"  Update aborted ({e})")
+            _emit_progress(on_progress, "DB update skipped (wiki down)")
             return False
         except Exception:
             print("  Hybrid fetch failed, trying wiki only...")
+            _emit_progress(on_progress, "DB: wiki fallback…")
             try:
                 items = fetch_items_from_wiki()
             except Exception:
                 print("  All sources unavailable, skipping update.")
+                _emit_progress(on_progress, "DB update skipped")
                 return False
 
         if not items:
+            _emit_progress(on_progress, "DB update skipped")
             return False
 
+        _emit_progress(on_progress, "DB: writing catalog…")
         existing = load_existing_csv(ITEMS_CSV)
         rows, stats = build_csv_rows(items, existing, merge=True)
 
@@ -3535,18 +3626,25 @@ def auto_update(*, force: bool = False) -> bool:
         try:
             from arc_helper.map_ingest import store_map_catalog
 
+            _emit_progress(on_progress, "DB: updating maps…")
             store_map_catalog(ARLO_DB, force_assets=False)
         except Exception as map_err:
             print(f"  Map catalog update skipped ({map_err})")
         _mark_updated()
 
         new_count = stats.items_written - stats.items_preserved
+        summary = (
+            f"DB updated: {stats.items_written} items "
+            f"({new_count} new)"
+        )
         print(
             f"  Database updated: {stats.items_written} items "
             f"({new_count} new, {stats.items_preserved} preserved) → {ARLO_DB.name}"
         )
+        _emit_progress(on_progress, summary)
     except Exception as e:
         print(f"  Database update skipped (error: {e})")
+        _emit_progress(on_progress, "DB update error")
         return False
     else:
         return True

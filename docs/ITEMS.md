@@ -22,7 +22,7 @@ Neither MetaForge nor the wiki is complete alone. Default hybrid mode picks per 
 
 ### Automatic Updates on Launch
 
-Every time `ARLO.exe` (or `uv run arc-helper`) starts, it checks for item database updates. This is throttled to once per 24 hours so it doesn't slow down repeated launches. The update runs in merge mode, meaning your manual action overrides are always preserved.
+Every time `ARLO.exe` (or `uv run arc-helper`) starts, it checks for item database updates **after** the status pill is shown (background thread). Progress milestones appear on the pill; OCR keeps using the existing catalog until the refresh finishes. This is throttled to once per 24 hours so it doesn't slow down repeated launches. The update runs in merge mode, meaning your manual action overrides are always preserved.
 
 Concrete endpoints / pages:
 
@@ -33,7 +33,7 @@ Concrete endpoints / pages:
 
 If MetaForge is unreachable, the updater falls back to the wiki for items. If both are down, the app starts with whatever databases it already has.
 
-Hybrid updates **abort** (no CSV/DB write, no 24h stamp) when the wiki Loot uses scrape fails or returns empty — continuing would overwrite rich `keep_for` notes with material fallbacks. Retry on the next launch or manual run once the wiki is healthy.
+Hybrid updates **preflight** MetaForge + wiki Loot in parallel before any bulk fetch, then **abort** (no CSV/DB write, no 24h stamp) if wiki is unreachable or returns empty uses — continuing would overwrite rich `keep_for` notes with material fallbacks. Retry on the next launch or manual run once the wiki is healthy.
 
 The throttle timestamp is stored in `.last_wiki_update` in the app directory. Delete this file to force an update on the next launch.
 

@@ -499,6 +499,7 @@ def test_fetch_items_hybrid_aborts_when_wiki_uses_scrape_fails(monkeypatch):
     import pytest
     import update_db
 
+    monkeypatch.setattr(update_db, "preflight_hybrid_sources", lambda **_k: None)
     monkeypatch.setattr(update_db, "fetch_metaforge_items", lambda: [{"name": "Battery"}])
     monkeypatch.setattr(update_db, "fetch_metaforge_recycle_map", lambda _items: {})
     monkeypatch.setattr(update_db, "fetch_metaforge_quest_items", lambda persist=True: {})
@@ -516,6 +517,7 @@ def test_fetch_items_hybrid_aborts_when_wiki_uses_empty(monkeypatch):
     import pytest
     import update_db
 
+    monkeypatch.setattr(update_db, "preflight_hybrid_sources", lambda **_k: None)
     monkeypatch.setattr(update_db, "fetch_metaforge_items", lambda: [{"name": "Battery"}])
     monkeypatch.setattr(update_db, "fetch_metaforge_recycle_map", lambda _items: {})
     monkeypatch.setattr(update_db, "fetch_metaforge_quest_items", lambda persist=True: {})
@@ -523,6 +525,29 @@ def test_fetch_items_hybrid_aborts_when_wiki_uses_empty(monkeypatch):
 
     with pytest.raises(update_db.WikiUnavailableError, match="no uses"):
         update_db.fetch_items_hybrid(persist_side_catalogs=False)
+
+
+def test_preflight_hybrid_aborts_before_bulk_fetch_when_wiki_down(monkeypatch):
+    import pytest
+    import update_db
+
+    called = {"mf": False}
+
+    def _probe(url: str, *, timeout: float = 8) -> None:
+        if "metaforge" in url:
+            return
+        raise update_db.requests.HTTPError("502 Server Error")
+
+    def _mf_items() -> list:
+        called["mf"] = True
+        return [{"name": "Battery"}]
+
+    monkeypatch.setattr(update_db, "_probe_http_ok", _probe)
+    monkeypatch.setattr(update_db, "fetch_metaforge_items", _mf_items)
+
+    with pytest.raises(update_db.WikiUnavailableError, match="Wiki unreachable"):
+        update_db.fetch_items_hybrid(persist_side_catalogs=False)
+    assert called["mf"] is False
 
 
 def test_auto_update_skips_write_when_wiki_unavailable(monkeypatch, tmp_path):
@@ -559,3 +584,82 @@ def test_auto_update_skips_write_when_wiki_unavailable(monkeypatch, tmp_path):
     assert wrote["csv"] is False
     assert not stamp.exists()
     assert "Workshop: Refiner 1 (5x)" in csv_path.read_text(encoding="utf-8")
+
+
+def test_is_auto_update_due_respects_stamp(monkeypatch, tmp_path):
+    import time
+
+    import update_db
+
+    stamp = tmp_path / ".last_wiki_update"
+    monkeypatch.setattr(update_db, "LAST_UPDATE_FILE", stamp)
+    assert update_db.is_auto_update_due() is True
+    stamp.write_text(str(time.time()), encoding="utf-8")
+    assert update_db.is_auto_update_due() is False
+    assert update_db.is_auto_update_due(force=True) is True
+
+
+def test_auto_update_emits_progress_milestones(monkeypatch, tmp_path):
+    import update_db
+
+    csv_path = tmp_path / "items.csv"
+    csv_path.write_text(
+        "name,action,recycle_for,keep_for,sell_price,stack_size\n",
+        encoding="utf-8",
+    )
+    stamp = tmp_path / ".last_wiki_update"
+    db_path = tmp_path / "arlo.db"
+    monkeypatch.setattr(update_db, "ITEMS_CSV", csv_path)
+    monkeypatch.setattr(update_db, "ARLO_DB", db_path)
+    monkeypatch.setattr(update_db, "LAST_UPDATE_FILE", stamp)
+
+    def _fake_hybrid(*, on_progress=None, persist_side_catalogs=True):
+        update_db._emit_progress(on_progress, "DB: MetaForge items…")
+        update_db._emit_progress(on_progress, "DB: recycle data…")
+        update_db._emit_progress(on_progress, "DB: quests…")
+        update_db._emit_progress(on_progress, "DB: wiki uses…")
+        return [
+            update_db.GameItem(
+                name="Battery",
+                category="Topside Material",
+                recycles_to="2x Metal Parts",
+                sell_price=250,
+                stack_size=15,
+                uses="Quests: Trash Into Treasure (1x)",
+            )
+        ]
+
+    monkeypatch.setattr(update_db, "fetch_items_hybrid", _fake_hybrid)
+    monkeypatch.setattr(update_db, "rebuild_arlo_db_from_csvs", lambda **_k: None)
+    monkeypatch.setattr(
+        "arc_helper.map_ingest.store_map_catalog",
+        lambda *_a, **_k: {},
+    )
+
+    seen: list[str] = []
+    assert update_db.auto_update(force=True, on_progress=seen.append) is True
+    assert seen[0] == "Updating database…"
+    assert "DB: MetaForge items…" in seen
+    assert "DB: wiki uses…" in seen
+    assert "DB: writing catalog…" in seen
+    assert "DB: updating maps…" in seen
+    assert any(s.startswith("DB updated:") for s in seen)
+    assert stamp.exists()
+
+
+def test_auto_update_progress_on_wiki_abort(monkeypatch, tmp_path):
+    import update_db
+
+    monkeypatch.setattr(update_db, "ITEMS_CSV", tmp_path / "items.csv")
+    monkeypatch.setattr(update_db, "ARLO_DB", tmp_path / "arlo.db")
+    monkeypatch.setattr(update_db, "LAST_UPDATE_FILE", tmp_path / ".last_wiki_update")
+
+    def _boom(*, on_progress=None, persist_side_catalogs=True):
+        raise update_db.WikiUnavailableError("wiki 502")
+
+    monkeypatch.setattr(update_db, "fetch_items_hybrid", _boom)
+
+    seen: list[str] = []
+    assert update_db.auto_update(force=True, on_progress=seen.append) is False
+    assert seen[0] == "Updating database…"
+    assert seen[-1] == "DB update skipped (wiki down)"
