@@ -272,7 +272,7 @@ class ScanSettings(BaseSettings):
         default=1.0,
         description=(
             "Seconds between inventory/map probes while not in inventory "
-            "(gameplay); longer = less capture wakeups"
+            "(gameplay); longer = less OCR work"
         ),
     )
     tooltip_scan_interval: float = Field(
@@ -310,6 +310,13 @@ class Settings(BaseSettings):
     # Screen capture backend: auto | x11 | wayland (Linux only)
     screen_backend: str = Field(
         default="auto", description="Screen backend: auto, x11 or wayland"
+    )
+
+    # Wayland only: frame rate requested from the compositor for the screen
+    # share. Lower costs less during gameplay; higher shortens the delay
+    # between the screen changing and ARLO seeing it (at most 1/fps seconds).
+    wayland_capture_fps: int = Field(
+        default=10, description="Wayland screen capture rate cap, frames per second"
     )
 
     # Hide keep_for / catalog need for projects whose Type is PAUSED (e.g. Expedition).
@@ -385,6 +392,7 @@ class Settings(BaseSettings):
             "",
             "# Platform settings",
             f"SCREEN_BACKEND={self.screen_backend}",
+            f"WAYLAND_CAPTURE_FPS={self.wayland_capture_fps}",
             f"HOTKEY_KEY={self.hotkey_key}",
             f"DISABLE_PAUSED_PROJECTS={str(self.disable_paused_projects).lower()}",
             "",

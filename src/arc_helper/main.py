@@ -70,6 +70,7 @@ from arc_helper.projects import get_project_catalog
 from arc_helper.quests import QuestCatalog
 from arc_helper.quests import get_quest_catalog
 from arc_helper.resolution_profiles import get_profile_manager
+from arc_helper.screen import FrameUnavailableError
 from arc_helper.screen import ScreenCaptureUnavailable
 from arc_helper.traders import TraderCatalog
 from arc_helper.traders import get_trader_catalog
@@ -88,6 +89,11 @@ _PROGRESS_FLASH_MS = 5000
 _DB_UPDATE_RESULT_MS = 3500
 _DB_UPDATE_STATUS_MAX = 56
 _MAP_MISS_STREAK_HINT = 8
+# While the map is open, re-check it this often so the in-game pins hide soon
+# after it closes. ``idle_scan_interval`` is tuned for gameplay and is too slow.
+_MAP_OPEN_POLL_S = 0.25
+# Pause after a grab with no current frame before trying the scan again.
+_NO_FRAME_RETRY_S = 0.25
 
 load_dotenv(Path(__file__).with_name(".env"), override=False)
 
@@ -178,7 +184,11 @@ class Scanner:
     # Wayland-only: tolerate flaky INVENTORY / tooltip OCR without remounting
     _wayland_stable: bool = False
     _trigger_miss_streak: int = 0
+    # Consecutive scans skipped because the backend had no current frame.
+    _no_frame_streak: int = 0
     _TRIGGER_MISS_LIMIT: ClassVar[int] = 2
+    _EMPTY_TOOLTIP_DIAG_AT: ClassVar[int] = 10
+    _empty_tooltip_streak: int = 0
     # True after we posted map_mode True until a closed probe succeeds.
     _map_idle_active: bool = False
 
@@ -239,7 +249,7 @@ class Scanner:
             self._set_capture_live(enabled=True)
             self._update_status("map")
             self.ui_queue.put(("map_mode", True))
-            time.sleep(idle_interval)
+            time.sleep(min(_MAP_OPEN_POLL_S, idle_interval))
             self.stats.trigger_scans += 1
             return True
 
@@ -306,10 +316,56 @@ class Scanner:
         item_name = ocr.extract_item_name_at_cursor()
         self.stats.tooltip_scans += 1
         if item_name:
+            if self._empty_tooltip_streak:
+                logger.info(
+                    "Tooltip OCR recovered after %s empty scans: %s",
+                    self._empty_tooltip_streak,
+                    item_name,
+                )
+            self._empty_tooltip_streak = 0
             self._handle_detected_item(item_name)
         else:
+            self._empty_tooltip_streak += 1
+            streak = self._empty_tooltip_streak
+            if streak in {1, self._EMPTY_TOOLTIP_DIAG_AT, 30}:
+                logger.info(
+                    "Tooltip OCR empty (streak=%s) while inventory active",
+                    streak,
+                )
+            if self._wayland_stable and streak == self._EMPTY_TOOLTIP_DIAG_AT:
+                self._dump_tooltip_diag(ocr)
             self._handle_empty_tooltip()
         time.sleep(settings.scan.tooltip_scan_interval)
+
+    @staticmethod
+    def _dump_tooltip_diag(ocr: OCREngine) -> None:
+        """One-shot capture dump when hover OCR stays empty (Wayland debug aid)."""
+        try:
+            from arc_helper.config import APP_DIR
+            from arc_helper.screen import get_backend
+
+            debug_dir = APP_DIR / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            image, cursor = ocr.capture_around_cursor()
+            raw_path = debug_dir / "tooltip_miss_raw.png"
+            processed = ocr.preprocess_tooltip(image)
+            proc_path = debug_dir / "tooltip_miss_processed.png"
+            image.save(raw_path)
+            processed.save(proc_path)
+            age = ""
+            backend = get_backend()
+            at = float(getattr(backend, "_frame_at", 0.0) or 0.0)
+            if at > 0:
+                age = f", frame_age={time.monotonic() - at:.2f}s"
+            logger.warning(
+                "Wrote %s and %s (cursor=%s%s) — check capture region covers the game tooltip",
+                raw_path,
+                proc_path,
+                (cursor.x, cursor.y),
+                age,
+            )
+        except Exception as e:  # ruff: ignore[blind-except]
+            logger.warning("Tooltip diag dump failed: %s", e)
 
     def _scan_tick(self, ocr: OCREngine, settings: Settings) -> bool:
         """One scanner iteration. Return False to stop the loop."""
@@ -337,6 +393,22 @@ class Scanner:
             try:
                 if not self._scan_tick(ocr, settings):
                     break
+                if self._no_frame_streak:
+                    logger.info(
+                        "Screen capture frames are back after %s skipped scans",
+                        self._no_frame_streak,
+                    )
+                    self._no_frame_streak = 0
+            except FrameUnavailableError as e:
+                # No current frame (stream reconnecting). Skip this scan and
+                # keep the state: a missing frame says nothing about whether
+                # the inventory or the map is still open.
+                self._no_frame_streak += 1
+                if self._no_frame_streak == 1:
+                    logger.warning(
+                        "No screen frame, skipping scans until one arrives: %s", e
+                    )
+                time.sleep(_NO_FRAME_RETRY_S)
             except ScreenCaptureUnavailable as e:
                 # Backend latched a fatal capture error. Keep the loop alive so a
                 # later portal reconnect (or manual share re-approve) can recover
@@ -365,7 +437,10 @@ class Scanner:
         logger.info(reason)
 
     def _set_capture_live(self, *, enabled: bool) -> None:
-        """Keep Wayland ScreenCast hot for inventory/map; pause during gameplay."""
+        """Tell the Wayland backend whether inventory/map scanning is active.
+
+        Currently a hint only: the stream runs all the time at a capped rate.
+        """
         if not self._wayland_stable:
             return
         from arc_helper.screen import set_live_capture
@@ -998,7 +1073,8 @@ class Application:
         elif kind == "progress_imported":
             self._apply_progress_profile(msg[1])
         elif kind == "db_update":
-            self._apply_db_update_msg(msg[1], msg[2] if len(msg) > 2 else "")
+            detail = msg[2] if len(msg) > 2 else ""  # ruff: ignore[magic-value-comparison]
+            self._apply_db_update_msg(msg[1], detail)
         elif kind == "map_pins_frame":
             self._apply_map_pins_frame(msg[1])
         elif kind == "map_thumb":

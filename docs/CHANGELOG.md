@@ -8,6 +8,12 @@ All notable changes to this project will be documented in this file.
 
 - Abort database updates if any of the sources are down
 - Show update status in ARLO's status pill
+- Wayland: the screen-share stream now runs the whole time and is never paused; pausing it between scans could leave it delivering no frames at all after a resume, which showed up as stale inventory/map reads and repeated reconnects
+- Wayland: add `WAYLAND_CAPTURE_FPS` (default 10) — the compositor is asked to send at most this many frames per second, which bounds the capture cost during gameplay
+- Wayland: one dead-stream rule (no frame for 1.5s rebuilds the share, with back-off) replaces the frame-reuse tiers and pipeline nudges; a stats line is logged once a minute
+- A screen grab that returns no frame now skips that scan instead of being read as "inventory closed"
+- In-game map pins hide sooner after the map closes (the open map is re-checked every 0.25s instead of every `IDLE_SCAN_INTERVAL`)
+- Add `python -m arc_helper.screen.streamprobe` to measure what the compositor delivers at different capture rates
 
 ### [1.0.3]
 

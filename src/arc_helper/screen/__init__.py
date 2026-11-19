@@ -9,12 +9,14 @@ import os
 import sys
 import threading
 
+from .base import FrameUnavailableError
 from .base import Point
 from .base import ScreenBackend
 from .base import ScreenCaptureUnavailable
 from .base import choose_backend_name
 
 __all__ = [
+    "FrameUnavailableError",
     "Point",
     "ScreenBackend",
     "ScreenCaptureUnavailable",
@@ -72,10 +74,10 @@ def phys_to_tk(value: float) -> int:  # ruff: ignore[non-empty-init-module]
 
 
 def set_live_capture(*, enabled: bool) -> None:  # ruff: ignore[non-empty-init-module]
-    """Hint the backend to keep capture hot (inventory/map) or idle-paused.
+    """Tell the backend whether the scanner is in inventory/map or gameplay.
 
-    Wayland pauses the GStreamer pipeline between sparse probes during
-    gameplay; mss backends no-op (already on-demand).
+    No backend acts on it today: mss captures on demand, and the Wayland
+    stream always runs at the rate set by ``WAYLAND_CAPTURE_FPS``.
     """
     backend = get_backend()
     setter = getattr(backend, "set_live_capture", None)
@@ -84,7 +86,7 @@ def set_live_capture(*, enabled: bool) -> None:  # ruff: ignore[non-empty-init-m
 
 
 def invalidate_cached_frame() -> None:  # ruff: ignore[non-empty-init-module]
-    """Drop any cached Wayland sample so the next grab must pull fresh pixels."""
+    """Ask the backend to drop any cached frame. A no-op on every backend today."""
     backend = get_backend()
     clearer = getattr(backend, "invalidate_cached_frame", None)
     if clearer is not None:
