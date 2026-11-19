@@ -1073,8 +1073,11 @@ class Application:
         elif kind == "progress_imported":
             self._apply_progress_profile(msg[1])
         elif kind == "db_update":
+            # Read index 1 before len(): basedpyright narrows the tuple from
+            # the length check and then rejects later indexes.
+            update_kind = msg[1]
             detail = msg[2] if len(msg) > 2 else ""  # ruff: ignore[magic-value-comparison]
-            self._apply_db_update_msg(msg[1], detail)
+            self._apply_db_update_msg(update_kind, detail)
         elif kind == "map_pins_frame":
             self._apply_map_pins_frame(msg[1])
         elif kind == "map_thumb":

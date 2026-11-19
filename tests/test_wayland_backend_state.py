@@ -196,10 +196,17 @@ def test_stats_separate_new_frames_from_keepalive_repeats():
     assert backend._stats.new_frames == 2
 
 
-def test_stats_line_logged_once_per_interval():
+def test_stats_line_logged_once_per_interval(monkeypatch: pytest.MonkeyPatch):
+    # Drive monotonic ourselves: CI VMs often have a small uptime, so
+    # ``started_at -= 61`` can go negative and be treated as "unset".
     backend = WaylandBackend()
+    clock = {"t": 1_000.0}
+    monkeypatch.setattr(
+        "arc_helper.screen.wayland_backend.time.monotonic",
+        lambda: clock["t"],
+    )
     assert backend._store_frame(_FRAME, 1) is None
-    backend._stats.started_at -= STATS_INTERVAL_S + 1
+    clock["t"] += STATS_INTERVAL_S + 1
     line = backend._store_frame(_FRAME, 2)
     assert line is not None
     assert "ScreenCast stats" in line

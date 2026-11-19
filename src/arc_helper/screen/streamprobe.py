@@ -418,14 +418,14 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             hint = ""
             missing_caps = sorted(
-                name for name in unknown if name.startswith("cap") and name[3:].isdigit()
+                name
+                for name in unknown
+                if name.startswith("cap") and name[3:].isdigit()
             )
             if missing_caps:
                 rates = ",".join(name[3:] for name in missing_caps)
                 hint = f" (add them with --fps {rates},…)"
-            parser.error(
-                f"unknown scenario(s): {', '.join(sorted(unknown))}{hint}"
-            )
+            parser.error(f"unknown scenario(s): {', '.join(sorted(unknown))}{hint}")
         scenarios = [sc for sc in scenarios if sc.name in wanted]
 
     for sc in scenarios:

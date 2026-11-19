@@ -2432,9 +2432,7 @@ def fetch_items_from_wiki() -> list[GameItem]:
 # =============================================================================
 
 
-def _emit_progress(
-    on_progress: Callable[[str], None] | None, message: str
-) -> None:
+def _emit_progress(on_progress: Callable[[str], None] | None, message: str) -> None:
     """Notify an optional progress callback (status pill / UI)."""
     if on_progress is None:
         return
@@ -2483,13 +2481,11 @@ def preflight_hybrid_sources(
                 print(f"  {name}: failed ({e})")
 
     if "Wiki" in errors:
-        raise WikiUnavailableError(
-            f"Wiki unreachable ({errors['Wiki']}); aborting to avoid wiping keep_for"
-        ) from errors["Wiki"]
+        msg = f"Wiki unreachable ({errors['Wiki']}); aborting to avoid wiping keep_for"
+        raise WikiUnavailableError(msg) from errors["Wiki"]
     if "MetaForge" in errors:
-        raise RuntimeError(
-            f"MetaForge unreachable ({errors['MetaForge']})"
-        ) from errors["MetaForge"]
+        msg = f"MetaForge unreachable ({errors['MetaForge']})"
+        raise RuntimeError(msg) from errors["MetaForge"]
 
 
 def fetch_items_hybrid(
@@ -2524,13 +2520,11 @@ def fetch_items_hybrid(
     except WikiUnavailableError:
         raise
     except Exception as e:
-        raise WikiUnavailableError(
-            f"Wiki uses scrape failed ({e}); aborting to avoid wiping keep_for"
-        ) from e
+        msg = f"Wiki uses scrape failed ({e}); aborting to avoid wiping keep_for"
+        raise WikiUnavailableError(msg) from e
     if not wiki_uses:
-        raise WikiUnavailableError(
-            "Wiki Loot returned no uses; aborting to avoid wiping keep_for"
-        )
+        msg = "Wiki Loot returned no uses; aborting to avoid wiping keep_for"
+        raise WikiUnavailableError(msg)
 
     project_map: dict[str, list[str]] = {}
     inactive_projects: set[str] = set()
@@ -3633,10 +3627,7 @@ def auto_update(
         _mark_updated()
 
         new_count = stats.items_written - stats.items_preserved
-        summary = (
-            f"DB updated: {stats.items_written} items "
-            f"({new_count} new)"
-        )
+        summary = f"DB updated: {stats.items_written} items ({new_count} new)"
         print(
             f"  Database updated: {stats.items_written} items "
             f"({new_count} new, {stats.items_preserved} preserved) → {ARLO_DB.name}"

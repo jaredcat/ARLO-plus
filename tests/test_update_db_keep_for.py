@@ -494,18 +494,23 @@ def test_scrape_amplify_keep_map_fossilized_lightning_anvil(monkeypatch):
     assert text.index("Research:") < text.index("Amplify:")
 
 
-
 def test_fetch_items_hybrid_aborts_when_wiki_uses_scrape_fails(monkeypatch):
     import pytest
+
     import update_db
 
     monkeypatch.setattr(update_db, "preflight_hybrid_sources", lambda **_k: None)
-    monkeypatch.setattr(update_db, "fetch_metaforge_items", lambda: [{"name": "Battery"}])
+    monkeypatch.setattr(
+        update_db, "fetch_metaforge_items", lambda: [{"name": "Battery"}]
+    )
     monkeypatch.setattr(update_db, "fetch_metaforge_recycle_map", lambda _items: {})
-    monkeypatch.setattr(update_db, "fetch_metaforge_quest_items", lambda persist=True: {})
+    monkeypatch.setattr(
+        update_db, "fetch_metaforge_quest_items", lambda persist=True: {}
+    )
 
     def _boom():
-        raise update_db.requests.HTTPError("502 Server Error")
+        msg = "502 Server Error"
+        raise update_db.requests.HTTPError(msg)
 
     monkeypatch.setattr(update_db, "scrape_wiki_uses", _boom)
 
@@ -515,13 +520,18 @@ def test_fetch_items_hybrid_aborts_when_wiki_uses_scrape_fails(monkeypatch):
 
 def test_fetch_items_hybrid_aborts_when_wiki_uses_empty(monkeypatch):
     import pytest
+
     import update_db
 
     monkeypatch.setattr(update_db, "preflight_hybrid_sources", lambda **_k: None)
-    monkeypatch.setattr(update_db, "fetch_metaforge_items", lambda: [{"name": "Battery"}])
+    monkeypatch.setattr(
+        update_db, "fetch_metaforge_items", lambda: [{"name": "Battery"}]
+    )
     monkeypatch.setattr(update_db, "fetch_metaforge_recycle_map", lambda _items: {})
-    monkeypatch.setattr(update_db, "fetch_metaforge_quest_items", lambda persist=True: {})
-    monkeypatch.setattr(update_db, "scrape_wiki_uses", lambda: {})
+    monkeypatch.setattr(
+        update_db, "fetch_metaforge_quest_items", lambda persist=True: {}
+    )
+    monkeypatch.setattr(update_db, "scrape_wiki_uses", dict)
 
     with pytest.raises(update_db.WikiUnavailableError, match="no uses"):
         update_db.fetch_items_hybrid(persist_side_catalogs=False)
@@ -529,6 +539,7 @@ def test_fetch_items_hybrid_aborts_when_wiki_uses_empty(monkeypatch):
 
 def test_preflight_hybrid_aborts_before_bulk_fetch_when_wiki_down(monkeypatch):
     import pytest
+
     import update_db
 
     called = {"mf": False}
@@ -536,7 +547,8 @@ def test_preflight_hybrid_aborts_before_bulk_fetch_when_wiki_down(monkeypatch):
     def _probe(url: str, *, timeout: float = 8) -> None:
         if "metaforge" in url:
             return
-        raise update_db.requests.HTTPError("502 Server Error")
+        msg = "502 Server Error"
+        raise update_db.requests.HTTPError(msg)
 
     def _mf_items() -> list:
         called["mf"] = True
@@ -568,7 +580,8 @@ def test_auto_update_skips_write_when_wiki_unavailable(monkeypatch, tmp_path):
     monkeypatch.setattr(update_db, "_should_auto_update", lambda: True)
 
     def _boom(**_kwargs):
-        raise update_db.WikiUnavailableError("wiki 502")
+        msg = "wiki 502"
+        raise update_db.WikiUnavailableError(msg)
 
     monkeypatch.setattr(update_db, "fetch_items_hybrid", _boom)
 
@@ -655,7 +668,8 @@ def test_auto_update_progress_on_wiki_abort(monkeypatch, tmp_path):
     monkeypatch.setattr(update_db, "LAST_UPDATE_FILE", tmp_path / ".last_wiki_update")
 
     def _boom(*, on_progress=None, persist_side_catalogs=True):
-        raise update_db.WikiUnavailableError("wiki 502")
+        msg = "wiki 502"
+        raise update_db.WikiUnavailableError(msg)
 
     monkeypatch.setattr(update_db, "fetch_items_hybrid", _boom)
 
