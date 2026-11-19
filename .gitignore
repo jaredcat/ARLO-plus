@@ -4,7 +4,10 @@ __pycache__/
 *.py[oc]
 debug
 .env*
+!.env.example
+!.envrc
 .scannerwork/
+.direnv/
 
 .claude
 .vscode
@@ -25,7 +28,6 @@ dist
 coverage.xml
 htmlcov/
 
-!.env.example
 .last_wiki_update
 .screencast_restore_token
 account-sync.json
