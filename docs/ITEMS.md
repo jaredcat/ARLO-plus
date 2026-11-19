@@ -7,7 +7,7 @@ Catalog data is one SQLite file `arlo.db` at the app root (tables for items, que
 Neither MetaForge nor the wiki is complete alone. Default hybrid mode picks per field:
 
 | Field | Source of truth | Notes |
-|-------|-----------------|-------|
+| ------- | ----------------- | ------- |
 | Item name, category, rarity, sell price, stack size | **MetaForge** Items API | Wiki Loot only if MetaForge is down |
 | Quest catalog, prerequisites, turn-ins | **MetaForge** Quests API + quest-tree | Wiki Quests page enriches / fills gaps |
 | Recycle yields (`recycle_for`) | **MetaForge** recycle table, then **wiki** Loot for gaps | MetaForge has more weapon/tier rows; wiki has nature/trinket rows MetaForge omits (e.g. Olives) |
@@ -57,6 +57,7 @@ uv run python update_db.py --csv-only
 ```
 
 Or use the makefile shortcuts:
+
 ```bash
 make update-db          # Full update
 make update-db-merge    # Merge mode
@@ -95,6 +96,7 @@ Merge also upgrades stale bare `Recycle` / `Sell` actions when `keep_for` names 
 The on-launch auto-update always uses merge mode. When you run the updater manually, you can choose between full update or merge mode.
 
 In merge mode the updater will:
+
 - **Preserve** your existing `action` for items already in your CSV (hand-tuned overrides)
 - **Refresh** `keep_for` from API/wiki scrape when the scrape produces a non-empty value; otherwise keep the old note
 - **Fill in** empty `recycle_for` from API data
@@ -119,14 +121,14 @@ You can also edit `data/items.csv` directly. The CSV has the following columns:
 
 ```csv
 name,action,recycle_for,keep_for,sell_price,stack_size
-Advanced Arc Powercell,Keep,2x ARC Powercell,Medical Lab: Surge Shield Recharger,640,5
+Advanced ARC Powercell,Keep,2x ARC Powercell,Medical Lab: Surge Shield Recharger,640,5
 ARC Alloy,Keep,2x Metal Parts,Workshop Explosives Station 1 (6x),200,15
 Air Freshener,Sell,,,,2000,5
 Alarm Clock,Recycle,"1x Processor, 6x Plastic Parts",,1000,3
 ```
 
 | Column | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `name` | Item name as it appears in-game (case-insensitive matching) |
 | `action` | Recommended action: `KEEP`, `RECYCLE`, `SELL`, `USE`, `TRASH`, or any custom text |
 | `recycle_for` | What you get when recycling (shown as `♻ …` when set) |

@@ -11,6 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-06-12-wayland-support-design.md`
 
 **Deliberate deviations from the spec** (call out to the user at the end):
+
 1. Env var is `SCREEN_BACKEND` (not `ARLO_SCREEN_BACKEND`) — the codebase's existing `.env` vars have no prefix (`DEBUG_MODE`, `TRIGGER_REGION_X`, …); consistency wins.
 2. Click-through is applied not only to the calibrate tracking overlay but also to the calibrate region rectangles, the `SHOW_CAPTURE_AREA` debug overlay, and the recommendation popup — same bug class, same one-line fix. The StatusWindow is exempt (right-click-to-quit must stay clickable).
 3. Fix a latent import bug found during planning: `main.py:98` imports `src.arc_helper.ocr`, which creates a duplicate module instance; it must be `arc_helper.ocr`.
@@ -68,15 +69,18 @@ README.md              # MODIFIED: Wayland section
 ### Task 0: Foundations — dependencies and test scaffolding
 
 **Files:**
+
 - Modify: `pyproject.toml`
 - Create: `tests/` (directory; pytest needs no `__init__.py`)
 
 - [ ] **Step 0.1: Install system build dependencies (idempotent)**
 
 Run:
+
 ```bash
 sudo pacman -S --needed cairo pkgconf gcc
 ```
+
 Expected: installs or reports "is up to date". (glib2, gstreamer, gst-plugins-base, gst-plugin-pipewire, pipewire, xdg-desktop-portal-kde are already installed — verified.)
 
 - [ ] **Step 0.2: Edit pyproject.toml**
@@ -113,11 +117,13 @@ requires-python = ">=3.9"
 - [ ] **Step 0.3: Sync and verify**
 
 Run:
+
 ```bash
 uv sync --all-extras
 uv run python -c "import gi; gi.require_version('Gst', '1.0'); gi.require_version('GstVideo', '1.0'); from gi.repository import Gio, GLib, Gst, GstVideo; Gst.init(None); print('gi OK', Gst.version_string())"
 uv run python -m pytest --version
 ```
+
 Expected: `gi OK GStreamer 1.28.3` (or similar) and a pytest version. If the PyGObject build fails, the error will name a missing `.pc` file — install the corresponding Arch package and re-run (`girepository-2.0` → `glib2`, `cairo` → `cairo`).
 
 - [ ] **Step 0.4: Commit**
@@ -132,6 +138,7 @@ git commit -m "Add wayland (PyGObject) and pytest dependencies"
 ### Task 1: `screen/base.py` — Point, protocol, backend selection, scale math
 
 **Files:**
+
 - Create: `src/arc_helper/screen/__init__.py` (minimal for now)
 - Create: `src/arc_helper/screen/base.py`
 - Test: `tests/test_backend_selection.py`, `tests/test_scale.py`
@@ -139,6 +146,7 @@ git commit -m "Add wayland (PyGObject) and pytest dependencies"
 - [ ] **Step 1.1: Write the failing tests**
 
 `tests/test_backend_selection.py`:
+
 ```python
 """Tests for screen backend selection logic."""
 
@@ -184,6 +192,7 @@ def test_override_is_case_insensitive():
 ```
 
 `tests/test_scale.py`:
+
 ```python
 """Tests for physical/logical scale computation."""
 
@@ -216,11 +225,13 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'arc_helper.screen'`
 - [ ] **Step 1.3: Implement**
 
 `src/arc_helper/screen/__init__.py` (minimal; expanded in Task 4):
+
 ```python
 """Screen access backends: capture, cursor position, resolution."""
 ```
 
 `src/arc_helper/screen/base.py`:
+
 ```python
 """Backend-neutral types and selection logic for screen access.
 
@@ -304,12 +315,14 @@ git commit -m "Add screen backend protocol, selection logic and scale math"
 ### Task 2: `screen/frame.py` — BGRx frame cropping
 
 **Files:**
+
 - Create: `src/arc_helper/screen/frame.py`
 - Test: `tests/test_frame.py`
 
 - [ ] **Step 2.1: Write the failing tests**
 
 `tests/test_frame.py`:
+
 ```python
 """Tests for BGRx frame cropping."""
 
@@ -390,6 +403,7 @@ Expected: FAIL — `ModuleNotFoundError` / `ImportError` for `arc_helper.screen.
 - [ ] **Step 2.3: Implement**
 
 `src/arc_helper/screen/frame.py`:
+
 ```python
 """Cropping raw BGRx frames into PIL images."""
 
@@ -444,6 +458,7 @@ git commit -m "Add BGRx frame cropping for portal capture"
 ### Task 3: `screen/token_store.py` — restore-token persistence
 
 **Files:**
+
 - Create: `src/arc_helper/screen/token_store.py`
 - Test: `tests/test_token_store.py`
 - Modify: `.gitignore`
@@ -451,6 +466,7 @@ git commit -m "Add BGRx frame cropping for portal capture"
 - [ ] **Step 3.1: Write the failing tests**
 
 `tests/test_token_store.py`:
+
 ```python
 """Tests for ScreenCast restore-token persistence."""
 
@@ -497,6 +513,7 @@ Expected: FAIL — ImportError.
 - [ ] **Step 3.3: Implement**
 
 `src/arc_helper/screen/token_store.py`:
+
 ```python
 """Persistence for the xdg-desktop-portal ScreenCast restore token.
 
@@ -537,6 +554,7 @@ def clear_token(path: Path | None = None) -> None:
 Run: `uv run pytest tests/test_token_store.py -v` → 5 PASS.
 
 Append to `.gitignore`:
+
 ```
 .screencast_restore_token
 diag_frame.png
@@ -555,6 +573,7 @@ git commit -m "Add restore-token persistence for portal sessions"
 ### Task 4: mss backend extraction + singleton wiring into ocr/config
 
 **Files:**
+
 - Create: `src/arc_helper/screen/mss_backend.py`
 - Modify: `src/arc_helper/screen/__init__.py`
 - Modify: `src/arc_helper/ocr.py` (lines 1–63: imports, `grab_screen`, `Point`, `get_cursor_position`)
@@ -563,6 +582,7 @@ git commit -m "Add restore-token persistence for portal sessions"
 - [ ] **Step 4.1: Implement `mss_backend.py`** (verbatim extraction of current behavior)
 
 `src/arc_helper/screen/mss_backend.py`:
+
 ```python
 """mss-based backend: native capture on Windows, XGetImage on X11."""
 
@@ -785,6 +805,7 @@ In `save_to_env`, append to the `lines` list (after the debug settings entries):
 - [ ] **Step 4.5: Verify nothing broke**
 
 Run:
+
 ```bash
 uv run pytest tests/ -v
 uv run python -c "
@@ -795,6 +816,7 @@ print('resolution:', config.get_screen_resolution())
 print('cursor:', ocr.get_cursor_position())
 "
 ```
+
 Expected: tests pass; the script prints the XWayland logical resolution (2194x1234 on this machine) and a cursor position — same values the old code produced. (XGetImage grabs still fail on Wayland; that's the point of the next tasks.)
 
 - [ ] **Step 4.6: Lint and commit**
@@ -810,6 +832,7 @@ git commit -m "Route screen capture, cursor and resolution through backend abstr
 ### Task 5: `screen/portal.py` — ScreenCast portal session
 
 **Files:**
+
 - Create: `src/arc_helper/screen/portal.py`
 
 No unit tests (requires a live portal); verified end-to-end by Task 7's diag. All D-Bus signatures below were verified against the portal docs and live PyGObject execution — do not "fix" them from memory.
@@ -817,6 +840,7 @@ No unit tests (requires a live portal); verified end-to-end by Task 7's diag. Al
 - [ ] **Step 5.1: Implement**
 
 `src/arc_helper/screen/portal.py`:
+
 ```python
 """xdg-desktop-portal ScreenCast session (D-Bus via Gio).
 
@@ -1063,11 +1087,13 @@ git commit -m "Add ScreenCast portal session handshake"
 ### Task 6: `screen/wayland_backend.py` — pipeline + frame store
 
 **Files:**
+
 - Create: `src/arc_helper/screen/wayland_backend.py`
 
 - [ ] **Step 6.1: Implement**
 
 `src/arc_helper/screen/wayland_backend.py`:
+
 ```python
 """Wayland screen backend: portal ScreenCast stream consumed via GStreamer.
 
@@ -1297,11 +1323,13 @@ git commit -m "Add Wayland backend: portal stream, frame store, scale mapping"
 ### Task 7: `screen/diag.py` + LIVE VERIFICATION CHECKPOINT
 
 **Files:**
+
 - Create: `src/arc_helper/screen/diag.py`
 
 - [ ] **Step 7.1: Implement**
 
 `src/arc_helper/screen/diag.py`:
+
 ```python
 """Live diagnostic for the screen backend.
 
@@ -1348,6 +1376,7 @@ if __name__ == "__main__":
 Run: `uv run python -m arc_helper.screen.diag`
 
 **Expected on first run:** KDE shows the screen-share dialog once → pick the monitor → output shows:
+
 - `backend    : wayland`
 - `resolution : 3840x2160` (the *physical* size — this is the fix for the 2194x1234 problem)
 - `tk scale   : 1.7502` (approximately)
@@ -1371,6 +1400,7 @@ git commit -m "Add screen backend diagnostic command"
 ### Task 8: `hotkey.py` — monitors + main.py rewiring
 
 **Files:**
+
 - Create: `src/arc_helper/hotkey.py`
 - Modify: `src/arc_helper/main.py` (remove lines 37-66 listener globals, lines 190-209 `_is_hotkey_held`, rewire call sites)
 - Test: `tests/test_hotkey.py`
@@ -1378,6 +1408,7 @@ git commit -m "Add screen backend diagnostic command"
 - [ ] **Step 8.1: Write the failing tests**
 
 `tests/test_hotkey.py`:
+
 ```python
 """Tests for the evdev hotkey monitor (with fake devices)."""
 
@@ -1455,6 +1486,7 @@ Expected: FAIL — ImportError.
 - [ ] **Step 8.3: Implement `hotkey.py`**
 
 `src/arc_helper/hotkey.py`:
+
 ```python
 """Hold-to-scan hotkey monitors.
 
@@ -1623,40 +1655,54 @@ Expected: 7 PASS.
 2. Delete the `_is_hotkey_held` static method (lines 190–209 in the original file).
 3. Remove `import ctypes` (no longer used in main.py).
 4. Add imports (with the other arc_helper imports):
+
    ```python
    from arc_helper.hotkey import HotkeyMonitor
    from arc_helper.hotkey import get_hotkey_monitor
    ```
+
 5. In the `Scanner` dataclass, add a field (after `stats`):
+
    ```python
        hotkey: HotkeyMonitor = field(default_factory=get_hotkey_monitor)
    ```
+
 6. In `Scanner.start`, replace
+
    ```python
         if sys.platform != "win32":
             _linux_key_listener_start()
    ```
+
    with
+
    ```python
         self.hotkey.start()
    ```
+
 7. In `Scanner.stop`, replace
+
    ```python
         if sys.platform != "win32":
             _linux_key_listener_stop()
    ```
+
    with
+
    ```python
         self.hotkey.stop()
    ```
+
 8. In `_scan_loop`, replace `hotkey_now = self._is_hotkey_held()` with `hotkey_now = self.hotkey.is_held()`.
 9. Update the startup log line `"Hold Ctrl+Shift to force tooltip scanning (vendor screens, etc.)"` to:
+
    ```python
         logger.info(
             "Hold the hotkey to force tooltip scanning (Ctrl+Shift; "
             f"{get_settings().hotkey_key} on Wayland)"
         )
    ```
+
    (`get_settings` is already imported in main.py.)
 
 - [ ] **Step 8.6: Verify, lint, commit**
@@ -1665,6 +1711,7 @@ Expected: 7 PASS.
 uv run pytest tests/ -v
 uv run python -c "from arc_helper.hotkey import get_hotkey_monitor; m = get_hotkey_monitor(); m.start(); print(type(m).__name__, 'held:', m.is_held()); m.stop()"
 ```
+
 Expected on this machine: `EvdevKeyMonitor held: False` (or `True` while holding Right Ctrl — try both).
 
 ```bash
@@ -1678,6 +1725,7 @@ git commit -m "Add hotkey monitor abstraction with evdev hold-key for Wayland"
 ### Task 9: `clickthrough.py` — input-transparent overlays
 
 **Files:**
+
 - Create: `src/arc_helper/clickthrough.py`
 - Modify: `src/arc_helper/calibrate.py` (`RegionSelector.show_overlay`, `TooltipCaptureConfig.start_tracking`)
 - Modify: `src/arc_helper/main.py` (`DebugOverlay.__init__`)
@@ -1686,6 +1734,7 @@ git commit -m "Add hotkey monitor abstraction with evdev hold-key for Wayland"
 - [ ] **Step 9.1: Implement `clickthrough.py`**
 
 `src/arc_helper/clickthrough.py`:
+
 ```python
 """Make tk overlay windows input-transparent so clicks pass through.
 
@@ -1745,30 +1794,38 @@ def _x11_click_through(window: tk.Misc) -> None:
 - [ ] **Step 9.2: Apply to the four overlay windows**
 
 `calibrate.py` — add import `from arc_helper.clickthrough import make_click_through`, then:
+
 - In `RegionSelector.show_overlay`, after `self.overlay.config(bg=self.color)` add:
+
   ```python
         make_click_through(self.overlay)
   ```
+
 - In `TooltipCaptureConfig.start_tracking`, after `self.overlay.config(bg="green")` add:
+
   ```python
         make_click_through(self.overlay)
   ```
 
 `main.py` — add import `from arc_helper.clickthrough import make_click_through`, and in `DebugOverlay.__init__`, after `self.window.config(bg="red")` add:
+
 ```python
         make_click_through(self.window)
 ```
 
 `overlay.py` — add import `from .clickthrough import make_click_through`, and in `OverlayWindow.__init__`, after `self._setup_ui()` add:
+
 ```python
         # The popup must never swallow game clicks
         make_click_through(self.window)
 ```
+
 Do NOT touch `StatusWindow` — its right-click-to-quit binding must keep receiving clicks.
 
 - [ ] **Step 9.3: LIVE CHECKPOINT — click-through works**
 
 Run: `uv run arc-calibrate`
+
 - Click **Start Tracking** with the default (uncalibrated) offsets — the green box glues to the cursor. **Verify all calibration buttons still respond to clicks** (this was the phase-0 freeze bug). Click **Stop Tracking**.
 - Click **Show Region** — verify clicking *through* the yellow rectangle onto whatever is below it works.
 
@@ -1785,6 +1842,7 @@ git commit -m "Make overlay windows click-through (fixes calibrate click swallow
 ### Task 10: Coordinate mapping for tk windows
 
 **Files:**
+
 - Modify: `src/arc_helper/overlay.py` (`OverlayWindow.show` geometry)
 - Modify: `src/arc_helper/main.py` (`DebugOverlay._update_position`)
 - Modify: `src/arc_helper/calibrate.py` (`RegionSelector._update_overlay`, `TooltipCaptureConfig._update_overlay_position`, `capture_at_cursor`)
@@ -1795,10 +1853,13 @@ All stored settings stay physical pixels; only tk `geometry()` calls convert.
 
 Add import: `from .screen import phys_to_tk`.
 In `OverlayWindow.show`, replace
+
 ```python
         self.window.geometry(f"+{self.overlay_x}+{self.overlay_y}")
 ```
+
 with
+
 ```python
         self.window.geometry(
             f"+{phys_to_tk(self.overlay_x)}+{phys_to_tk(self.overlay_y)}"
@@ -1808,6 +1869,7 @@ with
 - [ ] **Step 10.2: main.py DebugOverlay**
 
 Replace the whole `_update_position` method with (note: also fixes the `src.arc_helper` import bug):
+
 ```python
     def _update_position(self):
         """Update overlay position to follow cursor."""
@@ -1835,6 +1897,7 @@ Replace the whole `_update_position` method with (note: also fixes the `src.arc_
 Add imports: `from arc_helper.ocr import get_cursor_position` and `from arc_helper.screen import phys_to_tk`.
 
 `RegionSelector._update_overlay` — replace the geometry call with:
+
 ```python
             self.overlay.geometry(
                 f"{phys_to_tk(self.width.get())}x{phys_to_tk(self.height.get())}"
@@ -1843,6 +1906,7 @@ Add imports: `from arc_helper.ocr import get_cursor_position` and `from arc_help
 ```
 
 `TooltipCaptureConfig._update_overlay_position` — `winfo_pointerx/y` are already tk-logical; offsets/sizes are physical and must be converted. Replace from `offset_x = self.offset_x.get()` to the end of the method with:
+
 ```python
         offset_x = self.offset_x.get()
 
@@ -1856,10 +1920,12 @@ Add imports: `from arc_helper.ocr import get_cursor_position` and `from arc_help
 ```
 
 `TooltipCaptureConfig.capture_at_cursor` — replace the pointer lookup (the `try: root = ... winfo_pointerx ... except` block) with the backend cursor, which is physical and consistent with `grab_screen`:
+
 ```python
         cursor = get_cursor_position()
         cursor_x, cursor_y = cursor.x, cursor.y
 ```
+
 (The rest of the method already works in physical pixels; delete the now-unused `root = self.parent.winfo_toplevel()` line and keep the `return image, cursor_x, cursor_y`.)
 
 - [ ] **Step 10.4: Verify, lint, commit**
@@ -1868,6 +1934,7 @@ Add imports: `from arc_helper.ocr import get_cursor_position` and `from arc_help
 uv run pytest tests/ -v
 uv run ruff check src/arc_helper
 ```
+
 Live check: `uv run arc-calibrate` → **Show Region** for Trigger Region 1 with x=404 y=163 w=279 h=80 (or any values) — the rectangle should appear at the *physically* correct screen spot (under 175% scaling it will be drawn at tk coords ÷1.75). **Test OCR** should now capture without `XGetImage` errors and the preview should show the screen content under that region.
 
 ```bash
@@ -1880,6 +1947,7 @@ git commit -m "Map physical pixels to tk coordinates for overlays under Wayland 
 ### Task 11: Config examples, README, flake.nix
 
 **Files:**
+
 - Modify: `.env.example`
 - Modify: `README.md`
 - Modify: `flake.nix`
@@ -1887,6 +1955,7 @@ git commit -m "Map physical pixels to tk coordinates for overlays under Wayland 
 - [ ] **Step 11.1: .env.example**
 
 Append:
+
 ```
 # =============================================================================
 # PLATFORM SETTINGS (Linux)
@@ -1936,7 +2005,7 @@ Replace the file content with:
 
 ```nix
 {
-  description = "ARLO - Arc Raiders Loot Overlay (dev environment for NixOS)";
+  description = "ARLO - ARC Raiders Loot Overlay (dev environment for NixOS)";
 
   inputs.nixpkgs.url = "nixpkgs";
 
@@ -2021,6 +2090,7 @@ uv run python -c "import arc_helper.main, arc_helper.calibrate, arc_helper.overl
 - [ ] **Step 12.3: LIVE CHECKPOINT — calibration end-to-end**
 
 `uv run arc-calibrate`:
+
 1. Test OCR on a trigger region → captures without errors, preview shows screen content.
 2. Start Tracking → green box follows cursor at the right *physical* spot; buttons stay clickable; Stop Tracking works.
 3. Test OCR at Cursor → captures around the cursor correctly.
@@ -2028,7 +2098,8 @@ uv run python -c "import arc_helper.main, arc_helper.calibrate, arc_helper.overl
 
 - [ ] **Step 12.4: LIVE CHECKPOINT — the real thing**
 
-With Arc Raiders running (borderless windowed, under Proton):
+With ARC Raiders running (borderless windowed, under Proton):
+
 1. `uv run arc-helper` → log shows `Screen backend: wayland`, resolution 3840x2160, the 4K profile loads.
 2. Open the in-game inventory → status dot turns to `INVENTORY`.
 3. Hover an item → recommendation popup appears at the configured position, doesn't intercept clicks.

@@ -1,4 +1,4 @@
-# ARLO - Arc Raiders Loot Overlay
+# ARLO - ARC Raiders Loot Overlay
 
 <p align="center">
   <img src="static/ARLO.png" alt="ARLO" width="128" height="128">
@@ -6,7 +6,7 @@
 
 > Fork of [Soygen/ARLO](https://github.com/Soygen/ARLO), which builds on [Pabosik/PabsArcTooltip](https://github.com/Pabosik/PabsArcTooltip). The OCR tooltip overlay idea is Pabosik’s; Soygen named and packaged ARLO. This repo ([jaredcat/arlo-plus](https://github.com/jaredcat/arlo-plus)) is the actively maintained line — 1.0.0 ships a Qt (PySide6) UI and in-game map pins.
 
-A screen overlay tool for [Arc Raiders](https://store.steampowered.com/app/2073750/ARC_Raiders/) that detects items in your inventory and displays recommended actions (**keep**, **recycle**, **sell**) along with stack sizes, crafting details, and (in raid) sell prices. The item database auto-syncs from the [MetaForge API](https://metaforge.app/arc-raiders) on every launch.
+A screen overlay tool for [ARC Raiders](https://store.steampowered.com/app/2073750/ARC_Raiders/) that detects items in your inventory and displays recommended actions (**keep**, **recycle**, **sell**) along with stack sizes, crafting details, and (in raid) sell prices. The item database auto-syncs from the [MetaForge API](https://metaforge.app/arc-raiders) on every launch.
 
 [![Example 1](static/ARLO_01.png)](static/ARLO_01.png) [![Example 2](static/ARLO_02.png)](static/ARLO_02.png) [![Example 3](static/ARLO_03.png)](static/ARLO_03.png)
 
@@ -62,7 +62,7 @@ The overlay popup displays:
 ### Pre-built Release
 
 - Windows 10/11
-- Arc Raiders running in **borderless windowed** or **windowed** mode (not exclusive fullscreen)
+- ARC Raiders running in **borderless windowed** or **windowed** mode (not exclusive fullscreen)
 
 ### Running from Source
 
@@ -179,7 +179,7 @@ The app refreshes the catalog every launch (throttled to once per 24 hours) in *
 - **MetaForge** — item catalog, prices, stacks, quests; primary recycle rows
 - **Wiki** — workshop upgrade quantities, projects (incl. expiry), traders; recycle gap-fill; quest enrichment
 
-If MetaForge is unreachable, items fall back to the [Arc Raiders Wiki](https://arcraiders.wiki/wiki/Loot). If both are down, the app continues with whatever database it already has.
+If MetaForge is unreachable, items fall back to the [ARC Raiders Wiki](https://arcraiders.wiki/wiki/Loot). If both are down, the app continues with whatever database it already has.
 
 Updates always run in merge mode, so any manual action overrides you've made are preserved.
 
@@ -361,7 +361,7 @@ Please include your screen resolution, debug images from the `debug/` folder (en
 - **[Pabosik](https://github.com/Pabosik)** / [PabsArcTooltip](https://github.com/Pabosik/PabsArcTooltip) — original OCR inventory overlay concept
 - **[Soygen](https://github.com/Soygen)** / [ARLO](https://github.com/Soygen/ARLO) — ARLO naming and early packaging/catalog automation
 - **[MetaForge](https://metaforge.app/arc-raiders)** - Item catalog, prices, quests, primary recycles
-- **[Arc Raiders Wiki](https://arcraiders.wiki)** - Workshop/projects/traders, recycle gaps, item fallback
+- **[ARC Raiders Wiki](https://arcraiders.wiki)** - Workshop/projects/traders, recycle gaps, item fallback
 - **[Tesseract OCR](https://github.com/tesseract-ocr/tesseract)** - Text recognition engine
 - **[PyInstaller](https://pyinstaller.org/)** - Executable packaging
 
