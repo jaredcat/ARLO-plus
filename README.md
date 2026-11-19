@@ -237,6 +237,8 @@ ARLO writes `account-sync.json` next to the app and hot-reloads progress (no res
 
 Prerequisite: MetaForge must already be synced; ARLO only imports that snapshot.
 
+**Linux / Steam Deck — MetaForge Bridge:** The official Bridge is Windows-only (`metaforge://` deep links). On Linux, install the `.exe` into the game’s Proton prefix and launch it with `protontricks-launch`, then relay the deep link from the browser. Full steps: [linux-fertxo/metaforge-bridge-linux](https://github.com/linux-fertxo/metaforge-bridge-linux).
+
 ---
 
 ## Building the Standalone Executable
