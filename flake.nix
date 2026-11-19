@@ -1,5 +1,5 @@
 {
-  description = "ARLO - Arc Raiders Loot Overlay (dev environment for NixOS)";
+  description = "ARLO - ARC Raiders Loot Overlay (dev environment for NixOS)";
 
   inputs.nixpkgs.url = "nixpkgs";
 

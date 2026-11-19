@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hybrid Database Updater for ARLO (Arc Raiders Loot Overlay).
+Hybrid Database Updater for ARLO (ARC Raiders Loot Overlay).
 
 Source of truth by field (default ``--source hybrid``):
 
@@ -9,7 +9,7 @@ Source of truth by field (default ``--source hybrid``):
     - Quest catalog + turn-ins (``/quests``, ``/quest-tree``)
     - Recycle components (Supabase) when present
 
-  Arc Raiders Wiki (primary for these; MetaForge does not publish them)
+  ARC Raiders Wiki (primary for these; MetaForge does not publish them)
     - Workshop upgrade requirements (``Workshop`` / ``Scrappy`` / ``Outpost``
       pages — not the Loot Uses column, which mis-copies sibling quantities)
     - Outpost room expansion requirements (curated from MetaForge; wiki has no
@@ -96,7 +96,7 @@ PROJECTS_DB = ARLO_DB
 TRADERS_DB = ARLO_DB
 
 USER_AGENT = (
-    "ARLO/0.4 (Arc Raiders Loot Overlay - https://github.com/jaredcat/arlo-plus)"
+    "ARLO/1.0 (ARC Raiders Loot Overlay - https://github.com/jaredcat/arlo-plus)"
 )
 
 _QUICK_USE = "Quick Use"
@@ -3228,7 +3228,7 @@ def rebuild_arlo_db_from_csvs(*, db_path: Path = ARLO_DB) -> None:
 def _build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Update catalog CSVs and arlo.db from MetaForge API + Arc Raiders Wiki."
+            "Update catalog CSVs and arlo.db from MetaForge API + ARC Raiders Wiki."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -3317,7 +3317,7 @@ def _fetch_items_for_cli(
             persist_wiki_side_catalogs()
             # still try API; wiki enrich inside
             fetch_metaforge_quest_items(persist=True)
-        return items, "Arc Raiders Wiki"
+        return items, "ARC Raiders Wiki"
     if source == "api":
         return (
             fetch_items_from_metaforge_only(persist_side_catalogs=persist_side),
@@ -3333,7 +3333,7 @@ def _fetch_items_for_cli(
         items = fetch_items_from_wiki()
         if persist_side:
             persist_wiki_side_catalogs()
-        return items, "Arc Raiders Wiki (fallback)"
+        return items, "ARC Raiders Wiki (fallback)"
 
 
 def _print_update_stats(stats: ScraperStats, *, merge: bool) -> None:

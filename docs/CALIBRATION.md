@@ -2,19 +2,18 @@
 
 The Calibration tool (`Calibrate.exe` or `uv run arc-calibrate`) provides a GUI to configure the screen regions for your specific setup.
 
-
 TODO: add screenshots
 
 ### When to Calibrate
 
 - First time using the app with an unsupported resolution
 - After changing your screen resolution
-- After changing Arc Raiders display settings
+- After changing ARC Raiders display settings
 - If item detection isn't working correctly
 
 ### How to Calibrate
 
-1. **Launch Arc Raiders** and open your inventory (in the menu)
+1. **Launch ARC Raiders** and open your inventory (in the menu)
 2. **Run the Calibration tool**:
    - Pre-built: Run `Calibrate.exe`
    - From source: Run `uv run arc-calibrate`

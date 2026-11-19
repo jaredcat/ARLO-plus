@@ -34,7 +34,7 @@ METAFORGE_SITE = "https://metaforge.app"
 # Interactive map tiles live on the static host (see Metaforge MapConfigs.tileLayers).
 STATIC_BASE = "https://static.metaforge.app/arc-raiders"
 CDN_BASE = "https://cdn.metaforge.app/arc-raiders"
-USER_AGENT = "ARLO/1.0 (Arc Raiders Loot Overlay - https://github.com/Soygen/ARLO)"
+USER_AGENT = "ARLO/1.0 (ARC Raiders Loot Overlay - https://github.com/Soygen/ARLO)"
 
 _HTTP_OK = 200
 _MIN_PAIR = 2
