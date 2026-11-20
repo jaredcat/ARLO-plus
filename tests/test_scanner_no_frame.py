@@ -43,14 +43,16 @@ def _fail_grab(error: Exception):
 
 
 def test_capture_region_reports_no_frame_instead_of_black_image():
+    region = _region()
     with (
         patch("arc_helper.ocr.grab_screen", _fail_grab(OSError("stream stalled"))),
         pytest.raises(FrameUnavailableError, match="stream stalled"),
     ):
-        OCREngine.capture_region(_region())
+        OCREngine.capture_region(region)
 
 
 def test_capture_region_keeps_terminal_error_distinct():
+    region = _region()
     with (
         patch(
             "arc_helper.ocr.grab_screen",
@@ -58,7 +60,7 @@ def test_capture_region_keeps_terminal_error_distinct():
         ),
         pytest.raises(ScreenCaptureUnavailable),
     ):
-        OCREngine.capture_region(_region())
+        OCREngine.capture_region(region)
 
 
 def test_detect_map_open_propagates_no_frame():

@@ -35,15 +35,16 @@ def get_app_dir() -> Path:
 
 APP_DIR = get_app_dir()
 DATA_DIR = APP_DIR / "data"
+APP_ICON_FILENAME = "ARLO.png"
 
 
 def app_icon_path() -> Path | None:
     """Resolve the app icon (bundled ``static/`` or repo tree)."""
     candidates = (
-        APP_DIR / "static" / "ARLO.png",
+        APP_DIR / "static" / APP_ICON_FILENAME,
         # Frozen layouts sometimes keep datas next to the exe under _internal.
-        APP_DIR / "_internal" / "static" / "ARLO.png",
-        Path(__file__).resolve().parents[2] / "static" / "ARLO.png",
+        APP_DIR / "_internal" / "static" / APP_ICON_FILENAME,
+        Path(__file__).resolve().parents[2] / "static" / APP_ICON_FILENAME,
     )
     for path in candidates:
         if path.is_file():
