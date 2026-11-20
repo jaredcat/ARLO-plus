@@ -20,6 +20,7 @@ from .config import RegionMixin
 from .config import get_screen_resolution
 from .config import get_settings
 from .config import logger
+from .screen import FrameUnavailableError
 from .screen import Point
 from .screen import ScreenCaptureUnavailable
 from .screen import get_backend
@@ -95,12 +96,13 @@ class OCREngine:
         """Capture a screen region."""
         try:
             return grab_screen(region.bbox)
-        except ScreenCaptureUnavailable:
-            raise  # terminal: must reach the scanner's error handling, not become a black frame
+        except (ScreenCaptureUnavailable, FrameUnavailableError):
+            raise  # the scanner handles both; neither may become a black frame
         except OSError as e:
-            logger.error(f"Screen grab failed for region {region.bbox}: {e}")
-            # Return a dummy image to avoid crashing
-            return Image.new("RGB", (region.width, region.height), color="black")
+            # A black stand-in would OCR as "INVENTORY not on screen" and close
+            # the inventory scan. Report the missing frame instead.
+            msg = f"Screen grab failed for region {region.bbox}: {e}"
+            raise FrameUnavailableError(msg) from e
 
     def capture_around_cursor(self) -> tuple[Image.Image, Point]:
         """
@@ -139,14 +141,11 @@ class OCREngine:
 
         try:
             image = grab_screen((left, top, right, bottom))
-        except ScreenCaptureUnavailable:
-            raise  # terminal: must reach the scanner's error handling
+        except (ScreenCaptureUnavailable, FrameUnavailableError):
+            raise  # the scanner handles both
         except OSError as e:
-            logger.error(
-                f"Screen grab failed at bbox ({left}, {top}, {right}, {bottom}): {e}"
-            )
-            # Return a dummy image to avoid crashing
-            return Image.new("RGB", (100, 100), color="black"), cursor
+            msg = f"Screen grab failed at bbox ({left}, {top}, {right}, {bottom}): {e}"
+            raise FrameUnavailableError(msg) from e
 
         return image, cursor
 

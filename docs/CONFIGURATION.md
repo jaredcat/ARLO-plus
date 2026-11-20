@@ -49,6 +49,13 @@ IDLE_SCAN_INTERVAL=1.0           # Seconds between inventory/map probes while id
 TOOLTIP_SCAN_INTERVAL=0.3        # Seconds between tooltip scans
 
 # =============================================================================
+# PLATFORM SETTINGS (Linux)
+# =============================================================================
+
+SCREEN_BACKEND=auto              # auto | x11 | wayland
+WAYLAND_CAPTURE_FPS=10           # Wayland only: screen capture rate cap, see below
+
+# =============================================================================
 # PROJECTS
 # =============================================================================
 
@@ -82,6 +89,17 @@ SHOW_CAPTURE_AREA=false          # Show red rectangle around capture area
 ```
 
 See [MAP.md](MAP.md) for companion map usage and Metaforge attribution.
+
+### Wayland capture rate
+
+On Wayland, ARLO reads the screen through one screen-share stream that runs the whole time ARLO is open. `WAYLAND_CAPTURE_FPS` is the most frames per second the compositor is asked to send. The frame ARLO scans is at most `1 / WAYLAND_CAPTURE_FPS` seconds old, so 10 means at most 0.1 s.
+
+- Lower it (5, or 2) if you see a frame-time cost in game while ARLO is running.
+- Raise it if tooltips or map pins feel late. Values below 1 are clamped to 1; there is no upper limit (the compositor will not deliver more than its refresh rate).
+
+Once a minute the terminal prints a line such as `ScreenCast stats: 9.8 new frames/s (10.0 samples/s with keepalive), longest gap 105ms, max frame age at grab 98ms over 180 grabs`. A longest gap well above 500 ms, or `forcing reconnect` lines, means the stream stalled.
+
+To measure what your compositor delivers at different caps, close ARLO and run `python -m arc_helper.screen.streamprobe` (about four minutes). It reports the delivered rate, longest gap and ARLO's own CPU use for each cap.
 
 ### Debug Mode
 

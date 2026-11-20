@@ -26,6 +26,14 @@ class ScreenCaptureUnavailable(OSError):  # ruff: ignore[error-suffix-on-excepti
     """
 
 
+class FrameUnavailableError(OSError):
+    """No current frame right now (stream reconnecting, first frame pending).
+
+    Transient. Callers should skip the scan and retry rather than treat the
+    grab as an empty screen, which would read as "inventory closed".
+    """
+
+
 class ScreenBackend(Protocol):
     """Platform-specific screen access. All coordinates are physical pixels."""
 

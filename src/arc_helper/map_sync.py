@@ -25,6 +25,7 @@ from .map_data import norm_to_latlng
 from .map_data import reference_path
 from .ocr import get_ocr_engine
 from .ocr import grab_screen
+from .screen import FrameUnavailableError
 
 logger = logging.getLogger("arc_helper")
 
@@ -585,6 +586,8 @@ class MapSyncEngine:
         if region.width > 1 and region.height > 1:
             try:
                 img = grab_screen(region.bbox)
+            except FrameUnavailableError:
+                raise  # no frame is not "map closed": let the scanner retry
             except Exception:  # ruff: ignore[blind-except]
                 return False
             processed = ocr.preprocess_for_ocr(img, invert=True, scale=2)
@@ -609,6 +612,8 @@ class MapSyncEngine:
         )
         try:
             img = grab_screen(bottom)
+        except FrameUnavailableError:
+            raise  # no frame is not "map closed": let the scanner retry
         except Exception:  # ruff: ignore[blind-except]
             return False
         processed = ocr.preprocess_for_ocr(img, invert=True, scale=2)

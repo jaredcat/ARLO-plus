@@ -15,7 +15,7 @@ from pydantic_settings import SettingsConfigDict
 
 from .logging_config import setup_logging
 
-# Must be set before any GUI operations (tkinter/overlay imports)
+# Must be set before any GUI operations (Qt imports)
 if sys.platform == "win32":
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Windows 10 1607+
@@ -35,15 +35,16 @@ def get_app_dir() -> Path:
 
 APP_DIR = get_app_dir()
 DATA_DIR = APP_DIR / "data"
+APP_ICON_FILENAME = "ARLO.png"
 
 
 def app_icon_path() -> Path | None:
     """Resolve the app icon (bundled ``static/`` or repo tree)."""
     candidates = (
-        APP_DIR / "static" / "ARLO.png",
+        APP_DIR / "static" / APP_ICON_FILENAME,
         # Frozen layouts sometimes keep datas next to the exe under _internal.
-        APP_DIR / "_internal" / "static" / "ARLO.png",
-        Path(__file__).resolve().parents[2] / "static" / "ARLO.png",
+        APP_DIR / "_internal" / "static" / APP_ICON_FILENAME,
+        Path(__file__).resolve().parents[2] / "static" / APP_ICON_FILENAME,
     )
     for path in candidates:
         if path.is_file():
@@ -272,7 +273,7 @@ class ScanSettings(BaseSettings):
         default=1.0,
         description=(
             "Seconds between inventory/map probes while not in inventory "
-            "(gameplay); longer = less capture wakeups"
+            "(gameplay); longer = less OCR work"
         ),
     )
     tooltip_scan_interval: float = Field(
@@ -310,6 +311,13 @@ class Settings(BaseSettings):
     # Screen capture backend: auto | x11 | wayland (Linux only)
     screen_backend: str = Field(
         default="auto", description="Screen backend: auto, x11 or wayland"
+    )
+
+    # Wayland only: frame rate requested from the compositor for the screen
+    # share. Lower costs less during gameplay; higher shortens the delay
+    # between the screen changing and ARLO seeing it (at most 1/fps seconds).
+    wayland_capture_fps: int = Field(
+        default=10, description="Wayland screen capture rate cap, frames per second"
     )
 
     # Hide keep_for / catalog need for projects whose Type is PAUSED (e.g. Expedition).
@@ -385,6 +393,7 @@ class Settings(BaseSettings):
             "",
             "# Platform settings",
             f"SCREEN_BACKEND={self.screen_backend}",
+            f"WAYLAND_CAPTURE_FPS={self.wayland_capture_fps}",
             f"HOTKEY_KEY={self.hotkey_key}",
             f"DISABLE_PAUSED_PROJECTS={str(self.disable_paused_projects).lower()}",
             "",

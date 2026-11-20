@@ -120,15 +120,15 @@ The item database updates automatically on first launch. No separate step needed
 
 ### NixOS
 
-The project includes a `flake.nix` so you can build the Python dependency `evdev` (required by `pynput`) with kernel headers and a C compiler, and get X11 libraries for screen capture. From the repo root:
+The project includes a `flake.nix` so you can build the Python dependency `evdev` (required by `pynput`) with kernel headers and a C compiler, and get X11 libraries for screen capture. A committed `.envrc` loads that flake via [direnv](https://direnv.net/) and [nix-direnv](https://github.com/nix-community/nix-direnv).
 
-1. Enter the dev shell (first time will create `flake.lock`):
+1. Install `direnv` and `nix-direnv`, then allow the env once from the repo root:
 
 ```
-nix develop
+direnv allow
 ```
 
-1. Install dependencies and run the app:
+1. Install dependencies and run the app (shell tools are available automatically after `direnv allow`):
 
 ```
 uv sync --all-extras
@@ -136,7 +136,7 @@ cp -n .env.example .env   # if you don't have .env yet
 uv run arc-helper
 ```
 
-To run without entering the shell each time: `nix develop --command bash -c 'uv run arc-helper'`.
+Without direnv, enter the shell with `nix develop` and run the same commands.
 
 ### Linux: Wayland
 
@@ -159,11 +159,14 @@ scaling (e.g. 4K @ 175%) — no extra configuration needed.
 
 Notes and limitations:
 
-- The game must run under XWayland (Proton's default) for cursor-relative
-  tooltip detection; cursor position over native Wayland windows is stale.
+- Tooltip OCR crops a region next to the cursor. Cursor position is only
+  readable over XWayland windows (Proton's default). If the game is launched
+  with `PROTON_ENABLE_WAYLAND=1`, hovering an item will not show a
+  recommendation even though the status pill says INVENTORY. Inventory and
+  map detection do not use the cursor.
 - Tooltip capture is cursor-relative, while the game's info panel anchors to
-  the hovered item, so framing isn't pixel-perfect on Wayland — it works,
-  but you may see occasional "clamped" warnings in the log.
+  the hovered item, so framing isn't pixel-perfect — it works, but you may
+  see occasional "clamped" warnings in the log.
 - Force a backend with `SCREEN_BACKEND=x11|wayland` in `.env`.
 - Diagnostic: `uv run python -m arc_helper.screen.diag` prints the backend,
   resolution, scale and cursor, and saves a test capture to `diag_frame.png`.
@@ -233,6 +236,8 @@ GitHub README pages cannot host `javascript:` bookmarklets, so the drag target l
 ARLO writes `account-sync.json` next to the app and hot-reloads progress (no restart). On launch the status pill flashes **Progress: imported … · MetaForge synced …** for a few seconds. If ARLO is not running, the bookmark downloads `account-sync.json` instead — place it next to the app or run `uv run arc-import-progress import account-sync.json`.
 
 Prerequisite: MetaForge must already be synced; ARLO only imports that snapshot.
+
+**Linux / Steam Deck — MetaForge Bridge:** The official Bridge is Windows-only (`metaforge://` deep links). On Linux, install the `.exe` into the game’s Proton prefix and launch it with `protontricks-launch`, then relay the deep link from the browser. Full steps: [linux-fertxo/metaforge-bridge-linux](https://github.com/linux-fertxo/metaforge-bridge-linux).
 
 ---
 

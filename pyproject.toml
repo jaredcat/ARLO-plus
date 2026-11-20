@@ -1,6 +1,6 @@
 [project]
 name = "arlo"
-version = "1.0.3"
+version = "1.0.4"
 description = "Item recommendation overlay for ARC Raiders"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

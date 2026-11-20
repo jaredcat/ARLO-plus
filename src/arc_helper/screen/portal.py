@@ -40,6 +40,8 @@ SESSION_IFACE = "org.freedesktop.portal.Session"
 
 SOURCE_TYPE_MONITOR = 1
 CURSOR_MODE_HIDDEN = 1  # keep the pointer out of OCR frames
+# Pointer stays out of the pixels; its position rides along as buffer metadata.
+CURSOR_MODE_METADATA = 4
 PERSIST_UNTIL_REVOKED = 2
 
 RESPONSE_TIMEOUT_S = 10.0
@@ -60,8 +62,14 @@ class ScreenCastSession:
     session. It is NOT set by our own close().
     """
 
-    def __init__(self, restore_token: str | None = None) -> None:
+    def __init__(
+        self,
+        restore_token: str | None = None,
+        *,
+        cursor_mode: int = CURSOR_MODE_HIDDEN,
+    ) -> None:
         self.restore_token = restore_token
+        self.cursor_mode = cursor_mode
         self.new_restore_token: str | None = None
         self.node_id: int | None = None
         self.stream_props: dict = {}
@@ -129,7 +137,7 @@ class ScreenCastSession:
         select_options: dict[str, GLib.Variant] = {
             "types": GLib.Variant("u", SOURCE_TYPE_MONITOR),
             "multiple": GLib.Variant("b", False),  # ruff: ignore[boolean-positional-value-in-call]
-            "cursor_mode": GLib.Variant("u", CURSOR_MODE_HIDDEN),
+            "cursor_mode": GLib.Variant("u", self.cursor_mode),
             "persist_mode": GLib.Variant("u", PERSIST_UNTIL_REVOKED),
         }
         if self.restore_token:

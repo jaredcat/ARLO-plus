@@ -1,8 +1,8 @@
-## Item Database
+# Item Database
 
 Catalog data is one SQLite file `arlo.db` at the app root (tables for items, quests, projects, traders) plus readable CSVs under `data/` (`items.csv`, `quests.csv`, `projects.csv`, `traders.csv`) for diffs and manual edits. The items table columns are `name`, `action`, `recycle_for`, `keep_for`, `sell_price`, and `stack_size`. Quest/project requirement tables power remaining-need totals after a progress import; trader tables power overlay `Buy:` hints. The catalog updates automatically on every app launch (throttled to 24h).
 
-### Source of truth
+## Source of truth
 
 Neither MetaForge nor the wiki is complete alone. Default hybrid mode picks per field:
 
@@ -20,9 +20,9 @@ Neither MetaForge nor the wiki is complete alone. Default hybrid mode picks per 
 | Project requirements + schedule | **Wiki** Projects directory | `Type` / `Start` / `End`; expired temporary projects stay in the catalog but are excluded from keep / `Need:` |
 | Trader shop inventories (`Buy:`) | **Wiki** Traders directory | |
 
-### Automatic Updates on Launch
+## Automatic Updates on Launch
 
-Every time `ARLO.exe` (or `uv run arc-helper`) starts, it checks for item database updates. This is throttled to once per 24 hours so it doesn't slow down repeated launches. The update runs in merge mode, meaning your manual action overrides are always preserved.
+Every time `ARLO.exe` (or `uv run arc-helper`) starts, it checks for item database updates **after** the status pill is shown (background thread). Progress milestones appear on the pill; OCR keeps using the existing catalog until the refresh finishes. This is throttled to once per 24 hours so it doesn't slow down repeated launches. The update runs in merge mode, meaning your manual action overrides are always preserved.
 
 Concrete endpoints / pages:
 
@@ -33,9 +33,11 @@ Concrete endpoints / pages:
 
 If MetaForge is unreachable, the updater falls back to the wiki for items. If both are down, the app starts with whatever databases it already has.
 
+Hybrid updates **preflight** MetaForge + wiki Loot in parallel before any bulk fetch, then **abort** (no CSV/DB write, no 24h stamp) if wiki is unreachable or returns empty uses — continuing would overwrite rich `keep_for` notes with material fallbacks. Retry on the next launch or manual run once the wiki is healthy.
+
 The throttle timestamp is stored in `.last_wiki_update` in the app directory. Delete this file to force an update on the next launch.
 
-### Manual Update from Command Line
+## Manual Update from Command Line
 
 You can also run the updater directly for more control:
 
@@ -64,7 +66,7 @@ make update-db-merge    # Merge mode
 make update-db-dry      # Dry run preview
 ```
 
-### How Action Generation Works
+## How Action Generation Works
 
 The updater auto-generates action recommendations based on item category and uses:
 
@@ -79,7 +81,7 @@ The updater auto-generates action recommendations based on item category and use
 - **Quick Use** - `Keep` or `Use`
 - Items needed for quests get a `Quests: Name (Nx)` note in the `keep_for` field (combined with wiki workshop/project uses when present)
 
-### Overlay detail text
+## Overlay detail text
 
 The overlay shows **both** keep reasons and recycle yields when available:
 
@@ -91,7 +93,7 @@ So actions like `Keep until uses complete; recycle after` still show *what* to k
 
 Merge also upgrades stale bare `Recycle` / `Sell` actions when `keep_for` names a real quest/project/workshop use (so the colored action matches the keep reason).
 
-### Merge Mode
+## Merge Mode
 
 The on-launch auto-update always uses merge mode. When you run the updater manually, you can choose between full update or merge mode.
 
@@ -103,7 +105,7 @@ In merge mode the updater will:
 - **Add** any new items with auto-generated recommendations
 - **Always update** `sell_price` and `stack_size` to the latest values
 
-### GitHub Actions (Optional)
+## GitHub Actions (Optional)
 
 If you fork this repo, the included GitHub Actions workflow at `.github/workflows/update-db.yml` can sync the database on a schedule:
 
@@ -115,7 +117,7 @@ No secrets or configuration needed - just push the workflow file and it works.
 
 ---
 
-### Manual CSV Management
+## Manual CSV Management
 
 You can also edit `data/items.csv` directly. The CSV has the following columns:
 
@@ -138,7 +140,7 @@ Alarm Clock,Recycle,"1x Processor, 6x Plastic Parts",,1000,3
 
 The `sell_price` and `stack_size` columns are optional for backwards compatibility. If missing, the overlay just won't show that info for those items.
 
-### Managing the Database via Calibration Tool
+## Managing the Database via Calibration Tool
 
 1. Edit `data/items.csv` in Excel, Google Sheets, or any text editor
 2. Run `Calibrate.exe` (or `uv run arc-calibrate`)
@@ -149,7 +151,7 @@ The `sell_price` and `stack_size` columns are optional for backwards compatibili
 
 The database is automatically created on first run. Loading a CSV file will replace all existing items.
 
-### Tips for the CSV File
+## Tips for the CSV File
 
 - You can use Excel or Google Sheets to edit the CSV - just make sure to save as CSV format
 - Item names are matched case-insensitively (e.g., "Arc Circuitry" will match "ARC CIRCUITRY")

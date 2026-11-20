@@ -70,6 +70,7 @@ from arc_helper.projects import get_project_catalog
 from arc_helper.quests import QuestCatalog
 from arc_helper.quests import get_quest_catalog
 from arc_helper.resolution_profiles import get_profile_manager
+from arc_helper.screen import FrameUnavailableError
 from arc_helper.screen import ScreenCaptureUnavailable
 from arc_helper.traders import TraderCatalog
 from arc_helper.traders import get_trader_catalog
@@ -84,7 +85,15 @@ from arc_helper.ui.platform import apply_overlay_flags
 
 # How long the startup / post-import progress flash stays on the status pill.
 _PROGRESS_FLASH_MS = 5000
+# Brief hold after a background DB update finishes before returning to scanning.
+_DB_UPDATE_RESULT_MS = 3500
+_DB_UPDATE_STATUS_MAX = 56
 _MAP_MISS_STREAK_HINT = 8
+# While the map is open, re-check it this often so the in-game pins hide soon
+# after it closes. ``idle_scan_interval`` is tuned for gameplay and is too slow.
+_MAP_OPEN_POLL_S = 0.25
+# Pause after a grab with no current frame before trying the scan again.
+_NO_FRAME_RETRY_S = 0.25
 
 load_dotenv(Path(__file__).with_name(".env"), override=False)
 
@@ -175,7 +184,11 @@ class Scanner:
     # Wayland-only: tolerate flaky INVENTORY / tooltip OCR without remounting
     _wayland_stable: bool = False
     _trigger_miss_streak: int = 0
+    # Consecutive scans skipped because the backend had no current frame.
+    _no_frame_streak: int = 0
     _TRIGGER_MISS_LIMIT: ClassVar[int] = 2
+    _EMPTY_TOOLTIP_DIAG_AT: ClassVar[int] = 10
+    _empty_tooltip_streak: int = 0
     # True after we posted map_mode True until a closed probe succeeds.
     _map_idle_active: bool = False
 
@@ -236,7 +249,7 @@ class Scanner:
             self._set_capture_live(enabled=True)
             self._update_status("map")
             self.ui_queue.put(("map_mode", True))
-            time.sleep(idle_interval)
+            time.sleep(min(_MAP_OPEN_POLL_S, idle_interval))
             self.stats.trigger_scans += 1
             return True
 
@@ -303,10 +316,56 @@ class Scanner:
         item_name = ocr.extract_item_name_at_cursor()
         self.stats.tooltip_scans += 1
         if item_name:
+            if self._empty_tooltip_streak:
+                logger.info(
+                    "Tooltip OCR recovered after %s empty scans: %s",
+                    self._empty_tooltip_streak,
+                    item_name,
+                )
+            self._empty_tooltip_streak = 0
             self._handle_detected_item(item_name)
         else:
+            self._empty_tooltip_streak += 1
+            streak = self._empty_tooltip_streak
+            if streak in {1, self._EMPTY_TOOLTIP_DIAG_AT, 30}:
+                logger.info(
+                    "Tooltip OCR empty (streak=%s) while inventory active",
+                    streak,
+                )
+            if self._wayland_stable and streak == self._EMPTY_TOOLTIP_DIAG_AT:
+                self._dump_tooltip_diag(ocr)
             self._handle_empty_tooltip()
         time.sleep(settings.scan.tooltip_scan_interval)
+
+    @staticmethod
+    def _dump_tooltip_diag(ocr: OCREngine) -> None:
+        """One-shot capture dump when hover OCR stays empty (Wayland debug aid)."""
+        try:
+            from arc_helper.config import APP_DIR
+            from arc_helper.screen import get_backend
+
+            debug_dir = APP_DIR / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            image, cursor = ocr.capture_around_cursor()
+            raw_path = debug_dir / "tooltip_miss_raw.png"
+            processed = ocr.preprocess_tooltip(image)
+            proc_path = debug_dir / "tooltip_miss_processed.png"
+            image.save(raw_path)
+            processed.save(proc_path)
+            age = ""
+            backend = get_backend()
+            at = float(getattr(backend, "_frame_at", 0.0) or 0.0)
+            if at > 0:
+                age = f", frame_age={time.monotonic() - at:.2f}s"
+            logger.warning(
+                "Wrote %s and %s (cursor=%s%s) — check capture region covers the game tooltip",
+                raw_path,
+                proc_path,
+                (cursor.x, cursor.y),
+                age,
+            )
+        except Exception as e:  # ruff: ignore[blind-except]
+            logger.warning("Tooltip diag dump failed: %s", e)
 
     def _scan_tick(self, ocr: OCREngine, settings: Settings) -> bool:
         """One scanner iteration. Return False to stop the loop."""
@@ -334,6 +393,22 @@ class Scanner:
             try:
                 if not self._scan_tick(ocr, settings):
                     break
+                if self._no_frame_streak:
+                    logger.info(
+                        "Screen capture frames are back after %s skipped scans",
+                        self._no_frame_streak,
+                    )
+                    self._no_frame_streak = 0
+            except FrameUnavailableError as e:
+                # No current frame (stream reconnecting). Skip this scan and
+                # keep the state: a missing frame says nothing about whether
+                # the inventory or the map is still open.
+                self._no_frame_streak += 1
+                if self._no_frame_streak == 1:
+                    logger.warning(
+                        "No screen frame, skipping scans until one arrives: %s", e
+                    )
+                time.sleep(_NO_FRAME_RETRY_S)
             except ScreenCaptureUnavailable as e:
                 # Backend latched a fatal capture error. Keep the loop alive so a
                 # later portal reconnect (or manual share re-approve) can recover
@@ -362,7 +437,10 @@ class Scanner:
         logger.info(reason)
 
     def _set_capture_live(self, *, enabled: bool) -> None:
-        """Keep Wayland ScreenCast hot for inventory/map; pause during gameplay."""
+        """Tell the Wayland backend whether inventory/map scanning is active.
+
+        Currently a hint only: the stream runs all the time at a capped rate.
+        """
         if not self._wayland_stable:
             return
         from arc_helper.screen import set_live_capture
@@ -587,6 +665,8 @@ class Application:
         # MetaForge bookmarklet → localhost import bridge
         self._progress_flash_token = 0
         self._progress_flash_active = False
+        # Startup catalog refresh: hold status pill on update lines until done.
+        self._db_update_active = False
         start_import_server(on_import=self._on_progress_imported)
 
     def _on_progress_imported(self, profile: ProgressProfile) -> None:
@@ -628,7 +708,7 @@ class Application:
 
     def _apply_status(self, status: str) -> None:
         """Apply a status update to the StatusWindow (main thread only)."""
-        if self._progress_flash_active:
+        if self._progress_flash_active or self._db_update_active:
             return
         if status == "scanning":
             self.status.set_scanning()
@@ -640,6 +720,106 @@ class Application:
             self.status.set_hotkey()
         elif status == "error":
             self.status.set_error("Error")
+
+    @staticmethod
+    def _truncate_status(text: str, limit: int = _DB_UPDATE_STATUS_MAX) -> str:
+        text = (text or "").strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 1)].rstrip() + "…"
+
+    def _queue_db_update_progress(self, message: str) -> None:
+        """Thread-safe: push a DB-update progress line to the status pill."""
+        self.ui_queue.put(("db_update", "progress", message))
+
+    def _start_background_db_update(self) -> None:
+        """Run throttled catalog refresh off the UI thread after status is shown."""
+        sys.path.insert(0, str(APP_DIR))
+        try:
+            from update_db import auto_update
+            from update_db import is_auto_update_due
+        except Exception as e:  # ruff: ignore[blind-except]
+            logger.debug("Wiki auto-update unavailable: %s", e)
+            self._flash_progress_status(
+                format_progress_status(
+                    imported_mtime=account_sync_mtime(),
+                    metaforge_synced_at=account_sync_last_synced_at(),
+                )
+            )
+            return
+
+        if not is_auto_update_due():
+            self._flash_progress_status(
+                format_progress_status(
+                    imported_mtime=account_sync_mtime(),
+                    metaforge_synced_at=account_sync_last_synced_at(),
+                )
+            )
+            return
+
+        self._db_update_active = True
+        self.status.set_info("Updating database…")
+
+        def _run() -> None:
+            try:
+                ok = auto_update(on_progress=self._queue_db_update_progress)
+            except Exception as e:  # ruff: ignore[blind-except]
+                logger.debug("Background DB update failed: %s", e)
+                self.ui_queue.put(("db_update", "error", "DB update error"))
+                return
+            kind = "done" if ok else "aborted"
+            # Final progress line already set via on_progress; signal completion.
+            self.ui_queue.put(("db_update", kind, ""))
+
+        Thread(target=_run, name="arlo-db-update", daemon=True).start()
+
+    def _reload_catalogs_after_db_update(self) -> None:
+        """Refresh in-memory catalogs after arlo.db was rewritten."""
+        self.quest_catalog = get_quest_catalog()
+        self.project_catalog = get_project_catalog()
+        self.trader_catalog = get_trader_catalog()
+        self.scanner.quest_catalog = self.quest_catalog
+        self.scanner.project_catalog = self.project_catalog
+        self.scanner.trader_catalog = self.trader_catalog
+
+        map_catalog = get_map_catalog()
+        self.map_catalog = map_catalog
+        self.map_sync.catalog = map_catalog
+        self.map_window.catalog = map_catalog
+        logger.info(
+            "Catalogs reloaded after DB update (%s items, %s quests)",
+            self.db.count(),
+            self.quest_catalog.count() if self.quest_catalog else 0,
+        )
+
+    def _finish_db_update_status(self, kind: str, text: str) -> None:
+        """Clear the DB-update hold and show a brief result, then normal flash."""
+        if text:
+            self.status.set_info(self._truncate_status(text))
+        elif kind == "error":
+            self.status.set_info("DB update error")
+        # done/aborted with empty text: keep the last on_progress line.
+
+        def _clear() -> None:
+            self._db_update_active = False
+            self._flash_progress_status(
+                format_progress_status(
+                    imported_mtime=account_sync_mtime(),
+                    metaforge_synced_at=account_sync_last_synced_at(),
+                )
+            )
+
+        QTimer.singleShot(_DB_UPDATE_RESULT_MS, _clear)
+
+    def _apply_db_update_msg(self, kind: str, text: str) -> None:
+        """Handle background catalog-update messages on the main thread."""
+        if kind == "progress":
+            self._db_update_active = True
+            self.status.set_info(self._truncate_status(text or "Updating database…"))
+            return
+        if kind == "done":
+            self._reload_catalogs_after_db_update()
+        self._finish_db_update_status(kind, text)
 
     def _on_map_mode(self, *, active: bool) -> None:
         """Enter/leave raid-map mode: in-game pins loop; F8 for filters."""
@@ -892,6 +1072,12 @@ class Application:
             self.overlay.hide()
         elif kind == "progress_imported":
             self._apply_progress_profile(msg[1])
+        elif kind == "db_update":
+            # Read index 1 before len(): basedpyright narrows the tuple from
+            # the length check and then rejects later indexes.
+            update_kind = msg[1]
+            detail = msg[2] if len(msg) > 2 else ""  # ruff: ignore[magic-value-comparison]
+            self._apply_db_update_msg(update_kind, detail)
         elif kind == "map_pins_frame":
             self._apply_map_pins_frame(msg[1])
         elif kind == "map_thumb":
@@ -1061,13 +1247,9 @@ class Application:
         # Start the main-thread UI pump
         self._ui_pump_timer.start(50)
 
-        # Brief progress-import flash on startup (file mtime + MetaForge sync).
-        self._flash_progress_status(
-            format_progress_status(
-                imported_mtime=account_sync_mtime(),
-                metaforge_synced_at=account_sync_last_synced_at(),
-            )
-        )
+        # Catalog refresh runs after the status pill is visible (or flash progress
+        # import age when an update is not due).
+        self._start_background_db_update()
 
         try:
             self.app.exec()
@@ -1203,15 +1385,6 @@ def main() -> None:
         if not check_first_run():
             input("\nPress Enter to exit...")
             return
-
-        # Auto-update item database from wiki (throttled to once per 24h)
-        try:
-            sys.path.insert(0, str(APP_DIR))
-            from update_db import auto_update
-
-            auto_update()
-        except Exception as e:  # ruff: ignore[blind-except]
-            logger.debug(f"Wiki auto-update unavailable: {e}")
 
         settings = get_settings()
         logger.info(
