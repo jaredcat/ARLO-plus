@@ -15,7 +15,7 @@ from pydantic_settings import SettingsConfigDict
 
 from .logging_config import setup_logging
 
-# Must be set before any GUI operations (tkinter/overlay imports)
+# Must be set before any GUI operations (Qt imports)
 if sys.platform == "win32":
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Windows 10 1607+
